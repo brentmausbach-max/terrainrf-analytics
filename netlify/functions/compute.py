@@ -38,7 +38,7 @@ def handler(event=None, context=None):
         xx, yy = np.meshgrid(x, y)
 
         dist = np.sqrt((xx - lon)**2 + (yy - lat)**2)
-        mask = (dist < 0.15) & ((np.sin(xx * 50) + cmd_val := np.cos(yy * 50)) > -0.3)
+        mask = (dist < 0.15) & ((np.sin(xx * 50) + np.cos(yy * 50)) > -0.3)
 
         # 3. Create an RGBA image for the overlay
         img_array = np.zeros((grid_size, grid_size, 4), dtype=np.uint8)
