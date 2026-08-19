@@ -15,7 +15,6 @@ def handler(event=None, context=None):
     Compute viewshed bounds and generate overlay image.
     """
     try:
-        # Get data from Flask request or event fallback
         if request and request.is_json:
             data = request.get_json() or {}
         else:
@@ -25,9 +24,12 @@ def handler(event=None, context=None):
         lon = float(data.get("lon", -117.1))
         height = float(data.get("height", 2.0))
 
-        # 1. Calculate spatial bounds based on click
+        # 1. Unpack spatial bounds safely as a tuple/list
         bounds = calculate_search_bounds(lat, lon)
-        south, north, west, east = bounds[0], bounds[1], bounds[2], bounds[3]
+        south = bounds[0]
+        north = bounds[1]
+        west = bounds[2]
+        east = bounds[3]
 
         # 2. Generate a local viewshed grid for the overlay
         grid_size = 200
@@ -36,7 +38,7 @@ def handler(event=None, context=None):
         xx, yy = np.meshgrid(x, y)
 
         dist = np.sqrt((xx - lon)**2 + (yy - lat)**2)
-        mask = (dist < 0.15) & ((np.sin(xx * 50) + np.cos(yy * 50)) > -0.3)
+        mask = (dist < 0.15) & ((np.sin(xx * 50) + cmd_val := np.cos(yy * 50)) > -0.3)
 
         # 3. Create an RGBA image for the overlay
         img_array = np.zeros((grid_size, grid_size, 4), dtype=np.uint8)
