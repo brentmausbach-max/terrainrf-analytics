@@ -28,12 +28,18 @@ def compute_endpoint():
         lon = float(req_data.get("lon", -117.1))
         height = float(req_data.get("height", 2.0))
 
-        # 1. Calculate spatial bounds
+        # 1. Calculate spatial bounds and handle dict or list/tuple safely
         bounds = calculate_search_bounds(lat, lon)
-        south = bounds[0]
-        north = bounds[1]
-        west = bounds[2]
-        east = bounds[3]
+        if isinstance(bounds, dict):
+            south = bounds.get("south", lat - 0.05)
+            north = bounds.get("north", lat + 0.05)
+            west = bounds.get("west", lon - 0.05)
+            east = bounds.get("east", lon + 0.05)
+        else:
+            south = bounds[0]
+            north = bounds[1]
+            west = bounds[2]
+            east = bounds[3]
 
         # 2. Generate a local viewshed grid for the overlay
         grid_size = 200
