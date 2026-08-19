@@ -30,8 +30,8 @@ def compute_endpoint():
         lon = float(req_data.get("lon", -117.1))
         height = float(req_data.get("height", 2.0))
 
-        # 1. Force a guaranteed non-zero bounding box around the click point
-        span = 0.05
+        # 1. Use a tight local span so the overlay stays properly aligned
+        span = 0.005
         south = lat - span
         north = lat + span
         west = lon - span
