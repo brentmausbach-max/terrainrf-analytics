@@ -6,3 +6,4 @@
   from = "/compute"
   to = "/.netlify/functions/compute"
   status = 200
+  force = true
