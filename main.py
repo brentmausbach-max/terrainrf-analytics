@@ -30,8 +30,8 @@ def compute_endpoint():
         lon = float(req_data.get("lon", -117.1))
         height = float(req_data.get("height", 2.0))
 
-        # 1. Use a tight local span so the overlay stays properly aligned
-        span = 0.005
+        # 1. Use a wider regional span (0.3 degrees ~ 20+ miles)
+        span = 0.3
         south = lat - span
         north = lat + span
         west = lon - span
