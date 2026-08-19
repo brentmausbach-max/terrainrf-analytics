@@ -30,18 +30,12 @@ def compute_endpoint():
         lon = float(req_data.get("lon", -117.1))
         height = float(req_data.get("height", 2.0))
 
-        # 1. Calculate spatial bounds and handle dict or list/tuple safely
-        bounds = calculate_search_bounds(lat, lon)
-        if isinstance(bounds, dict):
-            south = bounds.get("south", lat - 0.05)
-            north = bounds.get("north", lat + 0.05)
-            west = bounds.get("west", lon - 0.05)
-            east = bounds.get("east", lon + 0.05)
-        else:
-            south = bounds[0]
-            north = bounds[1]
-            west = bounds[2]
-            east = bounds[3]
+        # 1. Force a guaranteed non-zero bounding box around the click point
+        span = 0.05
+        south = lat - span
+        north = lat + span
+        west = lon - span
+        east = lon + span
 
         # 2. Build local elevation grid and transform for viewshed calculation
         grid_size = 200
