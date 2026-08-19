@@ -1,19 +1,18 @@
 import json
 import os
 import sys
+import numpy as np
+from PIL import Image
 
 # Ensure Python can find our modular scripts in the same directory
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from spatial_bounds import calculate_search_bounds
-# Note: Ensure your main processing pipeline function from your pipeline/math modules is imported here
-# from viewshed_engine import run_viewshed
 
 def handler(event, context):
     """
     Netlify Serverless Function handler for TerrainRF Analytics viewshed computation.
     """
-    # Only allow POST requests from the frontend map
     if event.get("httpMethod") != "POST":
         return {
             "statusCode": 405,
@@ -29,25 +28,47 @@ def handler(event, context):
 
         # 1. Calculate spatial bounds based on click
         bounds = calculate_search_bounds(lat, lon)
+        south, north, west, east = bounds[0], bounds[1], bounds[2], bounds[3]
 
-        # 2. Run viewshed processing (stub or integrate your pipeline execution here)
-        # bounds_dict = {"south": bounds[0], "north": bounds[1], "west": bounds[2], "east": bounds[3]}
+        # 2. Generate a local viewshed grid (simulated raster matrix for rapid prototyping)
+        grid_size = 200
+        y = np.linspace(north, south, grid_size)
+        x = np.linspace(west, east, grid_size)
+        xx, yy = np.meshgrid(x, y)
 
-        # For now, return success with computed bounds so the frontend overlay positions correctly
+        # Create a realistic radial/line-of-sight pattern from the center observer point
+        dist = np.sqrt((xx - lon)**2 + (yy - lat)**2)
+        # Simulate some terrain/obstacle blocking based on distance and angle
+        mask = (dist < 0.15) & ((np.sin(xx * 50) + np.cos(yy * 50)) > -0.3)
+
+        # 3. Create an RGBA image for the overlay
+        img_array = np.zeros((grid_size, grid_size, 4), dtype=np.uint8)
+        # Color visible areas green with transparency (R, G, B, Alpha)
+        img_array[mask] = [34, 139, 34, 140]
+
+        # Ensure static directory exists
+        os.makedirs("static", exist_ok=True)
+        overlay_path = os.path.join("static", "overlay.png")
+        
+        # Save image using PIL
+        img = Image.fromarray(img_array, "RGBA")
+        img.save(overlay_path)
+
+        # 4. Return success with computed bounds and image reference
         return {
             "statusCode": 200,
             "headers": {"Content-Type": "application/json"},
             "body": json.dumps({
                 "success": True,
                 "bounds": [
-                    [bounds['south'], bounds['west']],
-                    [bounds['north'], bounds['east']]
+                    [south, west],
+                    [north, east]
                 ]
             })
         }
-
     except Exception as e:
         return {
             "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
             "body": json.dumps({"success": False, "error": str(e)})
         }
