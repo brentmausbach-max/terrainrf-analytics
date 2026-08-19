@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 import traceback
 from flask import Flask, request, jsonify, render_template
 
@@ -63,23 +64,34 @@ def compute_endpoint():
             max_radius_pixels=int(grid_size / 2)
         )
 
-        # 4. Create an RGBA image for the overlay and save to static folder
+        # 4. Create an RGBA image with full visibility color and save with unique name
         img_array = np.zeros((grid_size, grid_size, 4), dtype=np.uint8)
-        img_array[mask == 1] = [34, 139, 34, 140]
+        img_array[mask == 1] = [0, 255, 0, 200]  # Bright green with high opacity
 
         os.makedirs("static", exist_ok=True)
-        overlay_path = os.path.join("static", "overlay.png")
+        file_id = int(time.time() * 1000)
+        overlay_filename = f"overlay_{file_id}.png"
+        overlay_path = os.path.join("static", overlay_filename)
         
+        # Clean up older overlay files to save space
+        for f in os.listdir("static"):
+            if f.startswith("overlay_") and f.endswith(".png"):
+                try:
+                    os.remove(os.path.join("static", f))
+                except:
+                    pass
+
         img = Image.fromarray(img_array, "RGBA")
         img.save(overlay_path)
 
-        # 5. Return successful bounds to Leaflet
+        # 5. Return successful bounds and the unique overlay filename to frontend
         return jsonify({
             "success": True,
             "bounds": [
                 [south, west],
                 [north, east]
-            ]
+            ],
+            "overlay_url": f"/static/{overlay_filename}"
         })
     except Exception as e:
         traceback.print_exc()
