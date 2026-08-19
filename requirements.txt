@@ -1,3 +1,2 @@
-numpy
-rasterio
-requests
+flask
+gunicorn
