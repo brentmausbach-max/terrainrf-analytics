@@ -3,7 +3,7 @@ import os
 import sys
 import numpy as np
 from PIL import Image
-from flask import request
+from flask import jsonify, request
 
 # Ensure Python can find our modular scripts in the same directory
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -12,28 +12,24 @@ from spatial_bounds import calculate_search_bounds
 
 def handler(event=None, context=None):
     """
-    Handler supporting both Netlify serverless and direct Flask calls on Railway.
+    Compute viewshed bounds and generate overlay image.
     """
     try:
-        # Handle incoming data whether it's from Flask request or Netlify event
+        # Get data from Flask request or event fallback
         if request and request.is_json:
-            body = request.get_json() or {}
-        elif event and isinstance(event.get("body"), str):
-            body = json.loads(event.get("body", "{}"))
+            data = request.get_json() or {}
         else:
-            body = event or {}
+            data = event or {}
 
-        lat = float(body.get("lat", 32.8))
-        lon = float(body.get("lon", -117.1))
-        height = float(body.get("height", 2.0))
-
-        print(f"Processing viewshed for Lat: {lat}, Lon: {lon}, Height: {height}")
+        lat = float(data.get("lat", 32.8))
+        lon = float(data.get("lon", -117.1))
+        height = float(data.get("height", 2.0))
 
         # 1. Calculate spatial bounds based on click
         bounds = calculate_search_bounds(lat, lon)
         south, north, west, east = bounds[0], bounds[1], bounds[2], bounds[3]
 
-        # 2. Generate a local viewshed grid
+        # 2. Generate a local viewshed grid for the overlay
         grid_size = 200
         y = np.linspace(north, south, grid_size)
         x = np.linspace(west, east, grid_size)
@@ -52,21 +48,14 @@ def handler(event=None, context=None):
         img = Image.fromarray(img_array, "RGBA")
         img.save(overlay_path)
 
-        return {
-            "statusCode": 200,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({
-                "success": True,
-                "bounds": [
-                    [south, west],
-                    [north, east]
-                ]
-            })
-        }
+        # 4. Return standard Flask JSON response
+        return jsonify({
+            "success": True,
+            "bounds": [
+                [south, west],
+                [north, east]
+            ]
+        })
     except Exception as e:
-        print(f"Error in handler: {str(e)}")
-        return {
-            "statusCode": 500,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({"success": False, "error": str(e)})
-        }
+        print(f"Error in compute handler: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
