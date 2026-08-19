@@ -4,5 +4,6 @@
 
 [[redirects]]
   from = "/compute"
-  to = "/.netlify/functions/compute"
+  to = "https://terrainrf-analytics-production.up.railway.app/"
   status = 200
+  force = true
