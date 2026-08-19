@@ -4,10 +4,11 @@ import sys
 import traceback
 from flask import Flask, request, jsonify, render_template
 
-# Point Python directly to the netlify/functions directory so it finds spatial_bounds
+# Point Python directly to the netlify/functions directory so it finds spatial_bounds and viewshed_engine
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "netlify", "functions"))
 
 from spatial_bounds import calculate_search_bounds
+from viewshed_engine import compute_viewshed_matrix
 import numpy as np
 from PIL import Image
 
@@ -41,18 +42,30 @@ def compute_endpoint():
             west = bounds[2]
             east = bounds[3]
 
-        # 2. Generate a local viewshed grid for the overlay
+        # 2. Build local elevation grid and transform for viewshed calculation
         grid_size = 200
-        y = np.linspace(north, south, grid_size)
-        x = np.linspace(west, east, grid_size)
-        xx, yy = np.meshgrid(x, y)
+        elevation_grid = np.random.uniform(100, 500, size=(grid_size, grid_size))
+        
+        pixel_size_x = (east - west) / grid_size
+        pixel_size_y = (north - south) / grid_size
+        window_transform = [pixel_size_x, 0, west, 0, -pixel_size_y, north]
 
-        dist = np.sqrt((xx - lon)**2 + (yy - lat)**2)
-        mask = (dist < 0.15) & ((np.sin(xx * 50) + np.cos(yy * 50)) > -0.3)
+        observer_row = int(grid_size / 2)
+        observer_col = int(grid_size / 2)
 
-        # 3. Create an RGBA image for the overlay and save to static folder
+        # 3. Run the ray-casting matrix computation
+        mask = compute_viewshed_matrix(
+            elevation_grid=elevation_grid,
+            window_transform=window_transform,
+            observer_row=observer_row,
+            observer_col=observer_col,
+            observer_height_m=height,
+            max_radius_pixels=int(grid_size / 2)
+        )
+
+        # 4. Create an RGBA image for the overlay and save to static folder
         img_array = np.zeros((grid_size, grid_size, 4), dtype=np.uint8)
-        img_array[mask] = [34, 139, 34, 140]
+        img_array[mask == 1] = [34, 139, 34, 140]
 
         os.makedirs("static", exist_ok=True)
         overlay_path = os.path.join("static", "overlay.png")
@@ -60,7 +73,7 @@ def compute_endpoint():
         img = Image.fromarray(img_array, "RGBA")
         img.save(overlay_path)
 
-        # 4. Return successful bounds to Leaflet
+        # 5. Return successful bounds to Leaflet
         return jsonify({
             "success": True,
             "bounds": [
