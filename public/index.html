@@ -83,7 +83,7 @@
 
             currentMarker = L.marker([lat, lon]).addTo(map).bindPopup("Calculating viewshed...").openPopup();
 
-            fetch('/compute', {
+            fetch('https://terrainrf-analytics-production.up.railway.app/compute', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ lat: lat, lon: lon, height: height })
