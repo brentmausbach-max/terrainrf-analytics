@@ -1,11 +1,11 @@
 import json
 import os
+import sys
 import traceback
 from flask import Flask, request, jsonify, render_template
 
-# Ensure Python can find our modular scripts in the same directory
-import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Ensure Python can find modules inside netlify/functions
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "netlify", "functions"))
 from spatial_bounds import calculate_search_bounds
 import numpy as np
 from PIL import Image
