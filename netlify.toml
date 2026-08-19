@@ -2,9 +2,6 @@
   publish = "public"
   functions = "netlify/functions"
 
-[[plugins]]
-  package = "@netlify/plugin-python"
-
 [[redirects]]
   from = "/compute"
   to = "/.netlify/functions/compute"
