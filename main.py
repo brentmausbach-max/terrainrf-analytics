@@ -1,15 +1,17 @@
 import json
 import os
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from netlify.functions.compute import handler
 
 app = Flask(__name__)
+CORS(app)
 
 @app.route("/", methods=["POST", "GET"])
 def compute_endpoint():
     if request.method == "GET":
         return jsonify({"status": "TerrainRF Analytics Engine is running"}), 200
-    
+        
     try:
         # Get data sent from your frontend map
         req_data = request.get_json()
