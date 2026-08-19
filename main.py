@@ -4,8 +4,9 @@ import sys
 import traceback
 from flask import Flask, request, jsonify, render_template
 
-# Ensure Python can find modules inside netlify/functions
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "netlify", "functions"))
+# Point Python directly to the netlify/functions directory so it finds spatial_bounds
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "netlify", "functions"))
+
 from spatial_bounds import calculate_search_bounds
 import numpy as np
 from PIL import Image
