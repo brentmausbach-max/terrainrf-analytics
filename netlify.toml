@@ -1,2 +1,8 @@
 [build]
   publish = "public"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/compute"
+  to = "/.netlify/functions/compute"
+  status = 200

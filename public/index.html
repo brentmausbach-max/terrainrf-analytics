@@ -83,8 +83,27 @@
 
             currentMarker = L.marker([lat, lon]).addTo(map).bindPopup("Calculating viewshed...").openPopup();
 
-            currentMarker.bindPopup("Viewshed compute backend is currently offline. Static map mode active.").openPopup();
+            fetch('/compute', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lat: lat, lon: lon, height: height })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    var timestamp = new Date().getTime();
+                    currentOverlay = L.imageOverlay('/static/overlay.png?t=' + timestamp, data.bounds, { opacity: 0.7 }).addTo(map);
+                    currentMarker.bindPopup("<b>Observer Point</b><br>Lat: " + lat.toFixed(4) + "<br>Lon: " + lon.toFixed(4)).openPopup();
+                } else {
+                    alert("Server Error: " + data.error);
+                    currentMarker.bindPopup("Error: " + data.error).openPopup();
+                }
+            })
+            .catch(err => {
+                console.error("Fetch error:", err);
+                alert("Error: " + err.message);
             });
+        });
     </script>
 </body>
 </html>
