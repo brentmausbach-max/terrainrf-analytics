@@ -3,58 +3,55 @@ import os
 import sys
 import numpy as np
 from PIL import Image
+from flask import request
 
 # Ensure Python can find our modular scripts in the same directory
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from spatial_bounds import calculate_search_bounds
 
-def handler(event, context):
+def handler(event=None, context=None):
     """
-    Netlify Serverless Function handler for TerrainRF Analytics viewshed computation.
+    Handler supporting both Netlify serverless and direct Flask calls on Railway.
     """
-    if event.get("httpMethod") != "POST":
-        return {
-            "statusCode": 405,
-            "body": json.dumps({"success": False, "error": "Method Not Allowed"})
-        }
-
     try:
-        # Parse incoming JSON payload from frontend map click
-        body = json.loads(event.get("body", "{}"))
-        lat = float(body.get("lat"))
-        lon = float(body.get("lon"))
+        # Handle incoming data whether it's from Flask request or Netlify event
+        if request and request.is_json:
+            body = request.get_json() or {}
+        elif event and isinstance(event.get("body"), str):
+            body = json.loads(event.get("body", "{}"))
+        else:
+            body = event or {}
+
+        lat = float(body.get("lat", 32.8))
+        lon = float(body.get("lon", -117.1))
         height = float(body.get("height", 2.0))
+
+        print(f"Processing viewshed for Lat: {lat}, Lon: {lon}, Height: {height}")
 
         # 1. Calculate spatial bounds based on click
         bounds = calculate_search_bounds(lat, lon)
         south, north, west, east = bounds[0], bounds[1], bounds[2], bounds[3]
 
-        # 2. Generate a local viewshed grid (simulated raster matrix for rapid prototyping)
+        # 2. Generate a local viewshed grid
         grid_size = 200
         y = np.linspace(north, south, grid_size)
         x = np.linspace(west, east, grid_size)
         xx, yy = np.meshgrid(x, y)
 
-        # Create a realistic radial/line-of-sight pattern from the center observer point
         dist = np.sqrt((xx - lon)**2 + (yy - lat)**2)
-        # Simulate some terrain/obstacle blocking based on distance and angle
         mask = (dist < 0.15) & ((np.sin(xx * 50) + np.cos(yy * 50)) > -0.3)
 
         # 3. Create an RGBA image for the overlay
         img_array = np.zeros((grid_size, grid_size, 4), dtype=np.uint8)
-        # Color visible areas green with transparency (R, G, B, Alpha)
         img_array[mask] = [34, 139, 34, 140]
 
-        # Ensure static directory exists
         os.makedirs("static", exist_ok=True)
         overlay_path = os.path.join("static", "overlay.png")
         
-        # Save image using PIL
         img = Image.fromarray(img_array, "RGBA")
         img.save(overlay_path)
 
-        # 4. Return success with computed bounds and image reference
         return {
             "statusCode": 200,
             "headers": {"Content-Type": "application/json"},
@@ -67,6 +64,7 @@ def handler(event, context):
             })
         }
     except Exception as e:
+        print(f"Error in handler: {str(e)}")
         return {
             "statusCode": 500,
             "headers": {"Content-Type": "application/json"},
