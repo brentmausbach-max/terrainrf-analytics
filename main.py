@@ -1,5 +1,6 @@
 import json
 import os
+import traceback
 from flask import Flask, request, jsonify, render_template
 from netlify.functions.compute import handler
 
@@ -24,7 +25,8 @@ def compute_endpoint():
         response = handler(mock_event, None)
         return jsonify(response.get("body")), response.get("statusCode", 200)
     except Exception as e:
-        print("Error in compute:", str(e))
+        print("--- EXCEPTION CAUGHT ---")
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == "__main__":
