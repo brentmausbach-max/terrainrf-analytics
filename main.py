@@ -23,7 +23,17 @@ def compute_endpoint():
         }
         
         response = handler(mock_event, None)
-        return jsonify(response.get("body")), response.get("statusCode", 200)
+        if not response:
+            return jsonify({"success": False, "error": "Compute handler returned empty response"}), 500
+            
+        body = response.get("body")
+        if isinstance(body, str):
+            try:
+                body = json.loads(body)
+            except:
+                pass
+                
+        return jsonify(body if body is not None else {"success": False, "error": "Empty body"}), response.get("statusCode", 200)
     except Exception as e:
         print("--- EXCEPTION CAUGHT ---")
         traceback.print_exc()
