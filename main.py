@@ -58,9 +58,10 @@ def compute_endpoint():
             max_radius_pixels=int(grid_size / 2)
         )
 
-        # 4. Create an RGBA image with full visibility color and save with unique name
+        # 4. Create an RGBA image with transparent background and green visible mask
         img_array = np.zeros((grid_size, grid_size, 4), dtype=np.uint8)
-        img_array[mask == 1] = [0, 255, 0, 200]  # Bright green with high opacity
+        img_array[mask == 1] = [0, 255, 0, 200]  # Bright green visible pixels
+        img_array[mask == 0] = [0, 0, 0, 0]      # Completely transparent background
 
         os.makedirs("static", exist_ok=True)
         file_id = int(time.time() * 1000)
