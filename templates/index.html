@@ -12,7 +12,7 @@
         #controls {
             position: absolute; top: 10px; right: 10px; z-index: 1000;
             background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-            width: 240px;
+            width: 250px;
         }
         .control-group { margin-bottom: 10px; }
         .control-group label { display: block; font-weight: bold; font-size: 13px; margin-bottom: 3px; }
@@ -47,7 +47,15 @@
 
         <div class="control-group" id="heightGroup2" style="display: none;">
             <label>Receiver Height (m):</label>
-            <input type="number" id="obsHeight2" value="2.0">
+            <input type="number" id="obsHeight2" value="4.0">
+        </div>
+
+        <div class="control-group" id="fresnelGroup" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+            <label style="font-size: 12px;">Frequency (MHz):</label>
+            <input type="number" id="freqMhz" value="462.0" style="margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; font-weight: normal; font-size: 12px; cursor: pointer;">
+                <input type="checkbox" id="useFresnel" style="width: auto; margin-right: 6px;"> Apply 60% Fresnel Zone
+            </label>
         </div>
 
         <div class="control-group" id="p2pActionGroup" style="display: none;">
@@ -105,11 +113,13 @@
             if (mode === 'p2p') {
                 document.getElementById('heightGroup1').querySelector('label').innerText = 'Tower Height A (m):';
                 document.getElementById('heightGroup2').style.display = 'block';
+                document.getElementById('fresnelGroup').style.display = 'block';
                 document.getElementById('p2pActionGroup').style.display = 'block';
                 document.getElementById('p2pInstructions').style.display = 'block';
             } else {
                 document.getElementById('heightGroup1').querySelector('label').innerText = 'Observer Height (m):';
                 document.getElementById('heightGroup2').style.display = 'none';
+                document.getElementById('fresnelGroup').style.display = 'none';
                 document.getElementById('p2pActionGroup').style.display = 'none';
                 document.getElementById('p2pInstructions').style.display = 'none';
             }
@@ -222,7 +232,7 @@
                 } else {
                     p2pPoint2 = { lat: lat, lon: lon };
                     p2pMarker2 = L.marker([lat, lon]).addTo(map).bindPopup("Point B (Receiver)").openPopup();
-                    document.getElementById('p2pInstructions').innerText = "Both points set! Adjust heights and click 'Re-run P2P Link' anytime.";
+                    document.getElementById('p2pInstructions').innerText = "Both points set! Adjust heights/frequency and click 'Re-run P2P Link' anytime.";
                     
                     executeP2PAnalysis();
                 }
@@ -234,13 +244,16 @@
 
             var h1 = document.getElementById('obsHeight').value;
             var h2 = document.getElementById('obsHeight2').value;
+            var useFresnel = document.getElementById('useFresnel').checked;
+            var freqMhz = document.getElementById('freqMhz').value;
 
             fetch('/compute-p2p', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     lat1: p2pPoint1.lat, lon1: p2pPoint1.lon, h1: h1,
-                    lat2: p2pPoint2.lat, lon2: p2pPoint2.lon, h2: h2
+                    lat2: p2pPoint2.lat, lon2: p2pPoint2.lon, h2: h2,
+                    use_fresnel: useFresnel, frequency_mhz: freqMhz
                 })
             })
             .then(response => response.json())
@@ -256,7 +269,7 @@
                         p2pMarker2.bindPopup(statusText).openPopup();
                     }
 
-                    renderProfileChart(data.chart_data, data.clear, data.max_obstruction_m);
+                    renderProfileChart(data.chart_data, data.clear, data.max_obstruction_m, useFresnel);
                 } else {
                     alert("Server Error: " + data.error);
                 }
@@ -267,9 +280,10 @@
             });
         }
 
-        function renderProfileChart(chartData, isClear, maxObs) {
+        function renderProfileChart(chartData, isClear, maxObs, useFresnel) {
             document.getElementById('profileModal').style.display = 'block';
             var titleText = isClear ? "Path Elevation Profile — LINK CLEAR" : "Path Elevation Profile — BLOCKED (Max Obstruction: " + maxObs.toFixed(1) + "m)";
+            if (useFresnel) titleText += " [Fresnel Active]";
             document.getElementById('modalTitle').innerText = titleText;
 
             var ctx = document.getElementById('profileChart').getContext('2d');
@@ -277,30 +291,44 @@
                 profileChartInstance.destroy();
             }
 
+            var datasets = [
+                {
+                    label: 'Ground Elevation (m)',
+                    data: chartData.ground,
+                    borderColor: 'rgba(100, 100, 100, 1)',
+                    backgroundColor: 'rgba(150, 150, 150, 0.2)',
+                    fill: true,
+                    pointRadius: 0,
+                    borderWidth: 2
+                },
+                {
+                    label: 'Line-of-Sight Path (m)',
+                    data: chartData.los,
+                    borderColor: isClear ? 'rgba(0, 200, 0, 1)' : 'rgba(200, 0, 0, 1)',
+                    borderDash: [5, 5],
+                    pointRadius: 0,
+                    borderWidth: 2,
+                    fill: false
+                }
+            ];
+
+            if (useFresnel) {
+                datasets.push({
+                    label: '60% Fresnel Zone Limit (m)',
+                    data: chartData.fresnel,
+                    borderColor: 'rgba(255, 140, 0, 1)',
+                    borderDash: [2, 2],
+                    pointRadius: 0,
+                    borderWidth: 1.5,
+                    fill: false
+                });
+            }
+
             profileChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: chartData.distances,
-                    datasets: [
-                        {
-                            label: 'Ground Elevation (m)',
-                            data: chartData.ground,
-                            borderColor: 'rgba(100, 100, 100, 1)',
-                            backgroundColor: 'rgba(150, 150, 150, 0.2)',
-                            fill: true,
-                            pointRadius: 0,
-                            borderWidth: 2
-                        },
-                        {
-                            label: 'Line-of-Sight Path (m)',
-                            data: chartData.los,
-                            borderColor: isClear ? 'rgba(0, 200, 0, 1)' : 'rgba(200, 0, 0, 1)',
-                            borderDash: [5, 5],
-                            pointRadius: 0,
-                            borderWidth: 2,
-                            fill: false
-                        }
-                    ]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
