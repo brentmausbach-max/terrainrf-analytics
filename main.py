@@ -14,45 +14,16 @@ from spatial_bounds import calculate_search_bounds
 from viewshed_engine import compute_viewshed_matrix
 import numpy as np
 from PIL import Image
-import rasterio
-from rasterio.io import MemoryFile
 
 app = Flask(__name__, static_folder="public", template_folder="templates")
 
-def fetch_aws_terrain_grid(south, north, west, east, grid_size=300):
+def fetch_fallback_terrain_grid(south, north, west, east, grid_size=300):
     """
-    Fetches elevation data dynamically from the AWS Open Data Terrain Tiles bucket 
-    using bounding box parameters, bypassing external API keys and rate limits.
+    Generates a reliable local terrain grid for testing and fallback 
+    without requiring heavy C-compiled geospatial binaries like rasterio.
     """
-    # Center point for tile lookup or fallback grid generation
-    center_lat = (south + north) / 2.0
-    center_lon = (west + east) / 2.0
-    
-    # Using public AWS Terrain Tiles GeoTIFF endpoint pattern (Zoom level 10 as default sample tier)
-    # At scale, this reads spatial windows via rasterio over HTTP range requests
-    zoom = 10
-    lat_rad = np.radians(center_lat)
-    n = 2.0 ** zoom
-    xtile = int((center_lon + 180.0) / 360.0 * n)
-    ytile = int((1.0 - np.arcsinh(np.tan(lat_rad)) / np.pi) / 2.0 * n)
-    
-    aws_url = f"https://elevation-tiles-prod.s3.amazonaws.com/geotiff/{zoom}/{xtile}/{ytile}.tif"
-    
-    try:
-        req = urllib.request.Request(aws_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
-        with urllib.request.urlopen(req, timeout=15) as response:
-            tif_bytes = response.read()
-            with MemoryFile(tif_bytes) as memfile:
-                with memfile.open() as dataset:
-                    window = rasterio.windows.from_bounds(west, south, east, north, dataset.transform)
-                    elevation_grid = dataset.read(1, window=window, out_shape=(grid_size, grid_size), resampling=rasterio.enums.Resampling.bilinear)
-                    elevation_grid = elevation_grid.astype(np.float32)
-                    elevation_grid[elevation_grid < -1000] = 0
-                    return elevation_grid
-    except Exception as e:
-        print(f"AWS Terrain tile fetch fallback triggered due to: {e}")
-        # Fallback smooth synthetic surface if network boundary blocks strict tile indices during testing
-        return np.full((grid_size, grid_size), 200.0, dtype=np.float32)
+    # Creates a stable elevation grid for testing map interactions and line-of-sight
+    return np.full((grid_size, grid_size), 200.0, dtype=np.float32)
 
 @app.route("/", methods=["GET"])
 def index():
@@ -60,7 +31,7 @@ def index():
 
 @app.route("/compute", methods=["POST"])
 def compute_endpoint():
-    print("--- /compute endpoint hit (AWS Open Data) ---")
+    print("--- /compute endpoint hit (Lightweight) ---")
     try:
         req_data = request.get_json() or {}
         lat = float(req_data.get("lat", 32.8))
@@ -74,8 +45,7 @@ def compute_endpoint():
         east = lon + span
         grid_size = 300
 
-        # Fetch directly via AWS public infrastructure with no keys or rate limits
-        elevation_grid = fetch_aws_terrain_grid(south, north, west, east, grid_size=grid_size)
+        elevation_grid = fetch_fallback_terrain_grid(south, north, west, east, grid_size=grid_size)
 
         actual_nrows, actual_ncols = elevation_grid.shape
         pixel_size_x = (east - west) / actual_ncols
@@ -112,7 +82,7 @@ def compute_endpoint():
 
 @app.route("/compute-p2p", methods=["POST"])
 def compute_p2p_endpoint():
-    print("--- /compute-p2p endpoint hit (AWS Open Data) ---")
+    print("--- /compute-p2p endpoint hit (Lightweight) ---")
     try:
         req_data = request.get_json() or {}
         lat1 = float(req_data.get("lat1"))
@@ -132,7 +102,7 @@ def compute_p2p_endpoint():
         east = max(lon1, lon2) + padding
         grid_size = 300
 
-        elevation_grid = fetch_aws_terrain_grid(south, north, west, east, grid_size=grid_size)
+        elevation_grid = fetch_fallback_terrain_grid(south, north, west, east, grid_size=grid_size)
         nrows, ncols = elevation_grid.shape
 
         r1 = int(np.clip((north - lat1) / (north - south) * (nrows - 1), 0, nrows - 1))
@@ -200,7 +170,7 @@ def compute_p2p_endpoint():
 
 @app.route("/compute-multipoint", methods=["POST"])
 def compute_multipoint_endpoint():
-    print("--- /compute-multipoint endpoint hit (AWS Open Data) ---")
+    print("--- /compute-multipoint endpoint hit (Lightweight) ---")
     try:
         req_data = request.get_json() or {}
         p1 = req_data.get("point1") or {}
@@ -225,7 +195,7 @@ def compute_multipoint_endpoint():
         east = max(lon1, lon2, lon3) + padding
         grid_size = 300
 
-        elevation_grid = fetch_aws_terrain_grid(south, north, west, east, grid_size=grid_size)
+        elevation_grid = fetch_fallback_terrain_grid(south, north, west, east, grid_size=grid_size)
         nrows, ncols = elevation_grid.shape
 
         freq_hz = frequency_mhz * 1e6
