@@ -217,6 +217,7 @@
                     document.getElementById('p2pInstructions').innerText = "Point A set! Now click map for Point B (Receiver).";
                 } else {
                     p2pPoint2 = { lat: lat, lon: lon };
+                    if (p2pMarker2) { map.removeLayer(p2pMarker2); }
                     p2pMarker2 = L.marker([lat, lon]).addTo(map).bindPopup("Point B (Receiver)").openPopup();
                     document.getElementById('p2pInstructions').innerText = "Both points set! Adjust heights and click 'Re-run P2P Link' anytime.";
                     
