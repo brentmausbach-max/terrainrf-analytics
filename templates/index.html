@@ -5,6 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body, html { height: 100%; margin: 0; padding: 0; font-family: sans-serif; }
         #map { width: 100%; height: 100vh; }
@@ -16,6 +17,15 @@
         .control-group { margin-bottom: 10px; }
         .control-group label { display: block; font-weight: bold; font-size: 13px; margin-bottom: 3px; }
         .control-group input, .control-group select { width: 100%; padding: 5px; box-sizing: border-box; }
+        
+        /* Modal Popup Styling for Profile Graph */
+        #profileModal {
+            display: none; position: absolute; bottom: 20px; left: 20px; right: 20px; max-width: 800px;
+            margin: 0 auto; background: white; z-index: 2000; padding: 15px; border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        #profileModal h4 { margin: 0 0 10px 0; font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
+        #closeModal { cursor: pointer; background: #ddd; border: none; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -50,6 +60,18 @@
             <b>P2P Mode:</b> Click Map for Point A (Tower), then click for Point B (Receiver).
         </div>
     </div>
+
+    <!-- Side Profile Graph Modal -->
+    <div id="profileModal">
+        <h4>
+            <span id="modalTitle">Path Elevation Profile</span>
+            <button id="closeModal">X</button>
+        </h4>
+        <div style="height: 200px;">
+            <canvas id="profileChart"></canvas>
+        </div>
+    </div>
+
     <div id="map"></div>
 
     <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
@@ -64,16 +86,16 @@
         var currentMarker = null;
         var currentOverlay = null;
         
-        // P2P State Variables
         var p2pPoint1 = null;
         var p2pMarker1 = null;
         var p2pMarker2 = null;
         var p2pLine = null;
+        var profileChartInstance = null;
 
-        // Mode Switch UI Listener
         document.getElementById('analysisMode').addEventListener('change', function(e) {
             var mode = e.target.value;
             resetMapLayers();
+            document.getElementById('profileModal').style.display = 'none';
             if (mode === 'p2p') {
                 document.getElementById('heightGroup1').querySelector('label').innerText = 'Tower Height A (m):';
                 document.getElementById('heightGroup2').style.display = 'block';
@@ -85,6 +107,10 @@
             }
         });
 
+        document.getElementById('closeModal').addEventListener('click', function() {
+            document.getElementById('profileModal').style.display = 'none';
+        });
+
         function resetMapLayers() {
             if (currentMarker) { map.removeLayer(currentMarker); currentMarker = null; }
             if (currentOverlay) { map.removeLayer(currentOverlay); currentOverlay = null; }
@@ -92,9 +118,9 @@
             if (p2pMarker2) { map.removeLayer(p2pMarker2); p2pMarker2 = null; }
             if (p2pLine) { map.removeLayer(p2pLine); p2pLine = null; }
             p2pPoint1 = null;
+            document.getElementById('profileModal').style.display = 'none';
         }
 
-        // Search functionality
         document.getElementById('searchBtn').addEventListener('click', performSearch);
         document.getElementById('searchQuery').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') performSearch();
@@ -161,10 +187,10 @@
                 });
 
             } else {
-                // Point-to-Point Mode handling
                 if (!p2pPoint1) {
                     p2pPoint1 = { lat: lat, lon: lon };
                     if (p2pMarker1) map.removeLayer(p2pMarker1);
+                    document.getElementById('profileModal').style.display = 'none';
                     p2pMarker1 = L.marker([lat, lon]).addTo(map).bindPopup("Point A (Tower)").openPopup();
                 } else {
                     var p2pPoint2 = { lat: lat, lon: lon };
@@ -191,10 +217,12 @@
                             if (p2pLine) map.removeLayer(p2pLine);
                             p2pLine = L.polyline(data.path, { color: lineColor, weight: 4 }).addTo(map);
                             p2pMarker2.bindPopup(statusText).openPopup();
+
+                            // Render Chart Modal
+                            renderProfileChart(data.chart_data, data.clear, data.max_obstruction_m);
                         } else {
                             alert("Server Error: " + data.error);
                         }
-                        // Reset Point 1 for next check if desired, or keep session active
                         p2pPoint1 = null;
                     })
                     .catch(err => {
@@ -205,6 +233,56 @@
                 }
             }
         });
+
+        function renderProfileChart(chartData, isClear, maxObs) {
+            document.getElementById('profileModal').style.display = 'block';
+            var titleText = isClear ? "Path Elevation Profile — LINK CLEAR" : "Path Elevation Profile — BLOCKED (Max Obstruction: " + maxObs.toFixed(1) + "m)";
+            document.getElementById('modalTitle').innerText = titleText;
+
+            var ctx = document.getElementById('profileChart').getContext('2d');
+            if (profileChartInstance) {
+                profileChartInstance.destroy();
+            }
+
+            profileChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartData.distances,
+                    datasets: [
+                        {
+                            label: 'Ground Elevation (m)',
+                            data: chartData.ground,
+                            borderColor: 'rgba(100, 100, 100, 1)',
+                            backgroundColor: 'rgba(150, 150, 150, 0.2)',
+                            fill: true,
+                            pointRadius: 0,
+                            borderWidth: 2
+                        },
+                        {
+                            label: 'Line-of-Sight Path (m)',
+                            data: chartData.los,
+                            borderColor: isClear ? 'rgba(0, 200, 0, 1)' : 'rgba(200, 0, 0, 1)',
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            borderWidth: 2,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Distance (miles)' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Elevation (meters)' }
+                        }
+                    }
+                }
+            });
+        }
     </script>
 </body>
 </html>
