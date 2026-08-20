@@ -209,15 +209,18 @@
                 });
 
             } else {
-                if (!p2pPoint1 || (p2pPoint1 && p2pPoint2)) {
-                    // Start fresh pair
-                    resetMapLayers();
+                if (!p2pPoint1 || p2pPoint2) {
+                    if (p2pMarker1) { map.removeLayer(p2pMarker1); p2pMarker1 = null; }
+                    if (p2pMarker2) { map.removeLayer(p2pMarker2); p2pMarker2 = null; }
+                    if (p2pLine) { map.removeLayer(p2pLine); p2pLine = null; }
+                    document.getElementById('profileModal').style.display = 'none';
+
                     p2pPoint1 = { lat: lat, lon: lon };
+                    p2pPoint2 = null;
                     p2pMarker1 = L.marker([lat, lon]).addTo(map).bindPopup("Point A (Tower)").openPopup();
                     document.getElementById('p2pInstructions').innerText = "Point A set! Now click map for Point B (Receiver).";
                 } else {
                     p2pPoint2 = { lat: lat, lon: lon };
-                    if (p2pMarker2) { map.removeLayer(p2pMarker2); }
                     p2pMarker2 = L.marker([lat, lon]).addTo(map).bindPopup("Point B (Receiver)").openPopup();
                     document.getElementById('p2pInstructions').innerText = "Both points set! Adjust heights and click 'Re-run P2P Link' anytime.";
                     
@@ -227,6 +230,8 @@
         });
 
         function executeP2PAnalysis() {
+            if (!p2pPoint1 || !p2pPoint2) return;
+
             var h1 = document.getElementById('obsHeight').value;
             var h2 = document.getElementById('obsHeight2').value;
 
@@ -244,9 +249,12 @@
                     var lineColor = data.clear ? 'green' : 'red';
                     var statusText = data.clear ? "<b>Link Clear!</b>" : "<b>Link Blocked!</b> (Max obstruction: " + data.max_obstruction_m.toFixed(1) + "m)";
                     
-                    if (p2pLine) map.removeLayer(p2pLine);
+                    if (p2pLine) { map.removeLayer(p2pLine); }
                     p2pLine = L.polyline(data.path, { color: lineColor, weight: 4 }).addTo(map);
-                    p2pMarker2.bindPopup(statusText).openPopup();
+                    
+                    if (p2pMarker2) {
+                        p2pMarker2.bindPopup(statusText).openPopup();
+                    }
 
                     renderProfileChart(data.chart_data, data.clear, data.max_obstruction_m);
                 } else {
