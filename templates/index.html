@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>TerrainRF Analytics - Dynamic Viewshed</title>
+    <title>TerrainRF Analytics - Dynamic Viewshed & P2P</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
@@ -11,18 +11,44 @@
         #controls {
             position: absolute; top: 10px; right: 10px; z-index: 1000;
             background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            width: 240px;
         }
+        .control-group { margin-bottom: 10px; }
+        .control-group label { display: block; font-weight: bold; font-size: 13px; margin-bottom: 3px; }
+        .control-group input, .control-group select { width: 100%; padding: 5px; box-sizing: border-box; }
     </style>
 </head>
 <body>
     <div id="controls">
         <h3>TerrainRF Analytics</h3>
-        <p>Click anywhere on the map to calculate viewshed.</p>
-        <label>Observer Height (m):</label><br>
-        <input type="number" id="obsHeight" value="2.0" style="width: 100px; padding: 5px; margin-top: 5px;"><br>
-        <label style="margin-top: 10px; display: inline-block;">Search Location:</label><br>
-        <input type="text" id="searchQuery" placeholder="City, Zip, or Lat,Lon" style="width: 160px; padding: 5px; margin-top: 5px;">
-        <button id="searchBtn" style="padding: 5px 8px; margin-top: 5px; cursor: pointer;">Go</button>
+        
+        <div class="control-group">
+            <label>Analysis Mode:</label>
+            <select id="analysisMode">
+                <option value="viewshed">360° Viewshed</option>
+                <option value="p2p">Point-to-Point Link</option>
+            </select>
+        </div>
+
+        <div class="control-group" id="heightGroup1">
+            <label id="labelHeight1">Observer Height (m):</label>
+            <input type="number" id="obsHeight" value="2.0">
+        </div>
+
+        <div class="control-group" id="heightGroup2" style="display: none;">
+            <label>Receiver Height (m):</label>
+            <input type="number" id="obsHeight2" value="2.0">
+        </div>
+
+        <div class="control-group">
+            <label>Search Location:</label>
+            <input type="text" id="searchQuery" placeholder="City, Zip, or Lat,Lon">
+            <button id="searchBtn" style="padding: 5px 8px; margin-top: 5px; cursor: pointer; width: 100%;">Go</button>
+        </div>
+        
+        <div id="p2pInstructions" style="font-size: 12px; color: #555; margin-top: 5px; display: none;">
+            <b>P2P Mode:</b> Click Map for Point A (Tower), then click for Point B (Receiver).
+        </div>
     </div>
     <div id="map"></div>
 
@@ -37,6 +63,36 @@
 
         var currentMarker = null;
         var currentOverlay = null;
+        
+        // P2P State Variables
+        var p2pPoint1 = null;
+        var p2pMarker1 = null;
+        var p2pMarker2 = null;
+        var p2pLine = null;
+
+        // Mode Switch UI Listener
+        document.getElementById('analysisMode').addEventListener('change', function(e) {
+            var mode = e.target.value;
+            resetMapLayers();
+            if (mode === 'p2p') {
+                document.getElementById('heightGroup1').querySelector('label').innerText = 'Tower Height A (m):';
+                document.getElementById('heightGroup2').style.display = 'block';
+                document.getElementById('p2pInstructions').style.display = 'block';
+            } else {
+                document.getElementById('heightGroup1').querySelector('label').innerText = 'Observer Height (m):';
+                document.getElementById('heightGroup2').style.display = 'none';
+                document.getElementById('p2pInstructions').style.display = 'none';
+            }
+        });
+
+        function resetMapLayers() {
+            if (currentMarker) { map.removeLayer(currentMarker); currentMarker = null; }
+            if (currentOverlay) { map.removeLayer(currentOverlay); currentOverlay = null; }
+            if (p2pMarker1) { map.removeLayer(p2pMarker1); p2pMarker1 = null; }
+            if (p2pMarker2) { map.removeLayer(p2pMarker2); p2pMarker2 = null; }
+            if (p2pLine) { map.removeLayer(p2pLine); p2pLine = null; }
+            p2pPoint1 = null;
+        }
 
         // Search functionality
         document.getElementById('searchBtn').addEventListener('click', performSearch);
@@ -76,32 +132,78 @@
         map.on('click', function(e) {
             var lat = e.latlng.lat;
             var lon = e.latlng.lng;
-            var height = document.getElementById('obsHeight').value;
+            var mode = document.getElementById('analysisMode').value;
 
-            if (currentMarker) map.removeLayer(currentMarker);
-            if (currentOverlay) map.removeLayer(currentOverlay);
+            if (mode === 'viewshed') {
+                var height = document.getElementById('obsHeight').value;
+                resetMapLayers();
 
-            currentMarker = L.marker([lat, lon]).addTo(map).bindPopup("Calculating viewshed...").openPopup();
+                currentMarker = L.marker([lat, lon]).addTo(map).bindPopup("Calculating viewshed...").openPopup();
 
-            fetch('/compute', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ lat: lat, lon: lon, height: height })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    currentOverlay = L.imageOverlay(data.overlay_url, data.bounds, { opacity: 0.7 }).addTo(map);
-                    currentMarker.bindPopup("<b>Observer Point</b><br>Lat: " + lat.toFixed(4) + "<br>Lon: " + lon.toFixed(4)).openPopup();
+                fetch('/compute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lat: lat, lon: lon, height: height })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        currentOverlay = L.imageOverlay(data.overlay_url, data.bounds, { opacity: 0.7 }).addTo(map);
+                        currentMarker.bindPopup("<b>Observer Point</b><br>Lat: " + lat.toFixed(4) + "<br>Lon: " + lon.toFixed(4)).openPopup();
+                    } else {
+                        alert("Server Error: " + data.error);
+                        currentMarker.bindPopup("Error: " + data.error).openPopup();
+                    }
+                })
+                .catch(err => {
+                    console.error("Fetch error:", err);
+                    alert("Error: " + err.message);
+                });
+
+            } else {
+                // Point-to-Point Mode handling
+                if (!p2pPoint1) {
+                    p2pPoint1 = { lat: lat, lon: lon };
+                    if (p2pMarker1) map.removeLayer(p2pMarker1);
+                    p2pMarker1 = L.marker([lat, lon]).addTo(map).bindPopup("Point A (Tower)").openPopup();
                 } else {
-                    alert("Server Error: " + data.error);
-                    currentMarker.bindPopup("Error: " + data.error).openPopup();
+                    var p2pPoint2 = { lat: lat, lon: lon };
+                    if (p2pMarker2) map.removeLayer(p2pMarker2);
+                    p2pMarker2 = L.marker([lat, lon]).addTo(map).bindPopup("Point B (Receiver)").openPopup();
+
+                    var h1 = document.getElementById('obsHeight').value;
+                    var h2 = document.getElementById('obsHeight2').value;
+
+                    fetch('/compute-p2p', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            lat1: p2pPoint1.lat, lon1: p2pPoint1.lon, h1: h1,
+                            lat2: p2pPoint2.lat, lon2: p2pPoint2.lon, h2: h2
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            var lineColor = data.clear ? 'green' : 'red';
+                            var statusText = data.clear ? "<b>Link Clear!</b>" : "<b>Link Blocked!</b> (Max obstruction: " + data.max_obstruction_m.toFixed(1) + "m)";
+                            
+                            if (p2pLine) map.removeLayer(p2pLine);
+                            p2pLine = L.polyline(data.path, { color: lineColor, weight: 4 }).addTo(map);
+                            p2pMarker2.bindPopup(statusText).openPopup();
+                        } else {
+                            alert("Server Error: " + data.error);
+                        }
+                        // Reset Point 1 for next check if desired, or keep session active
+                        p2pPoint1 = null;
+                    })
+                    .catch(err => {
+                        console.error("P2P fetch error:", err);
+                        alert("Error: " + err.message);
+                        p2pPoint1 = null;
+                    });
                 }
-            })
-            .catch(err => {
-                console.error("Fetch error:", err);
-                alert("Error: " + err.message);
-            });
+            }
         });
     </script>
 </body>
