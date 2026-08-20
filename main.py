@@ -39,11 +39,14 @@ def compute_endpoint():
         grid_size = 300
         api_key = "d58e9f652fa6e05bef48afa87c718844"
         
-        # Restored API_Key with underscore
+        # Clean, explicit concatenation to prevent any formatting/tag corruption
         api_url = (
-            f"https://portal.opentopography.org/API/globaldem?"
-            f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
-            f"&outputFormat=AAIGrid&API_Key={api_key}"
+            "https://portal.opentopography.org/API/globaldem?"
+            "demtype=SRTMGL1&south=" + str(south) + 
+            "&north=" + str(north) + 
+            "&west=" + str(west) + 
+            "&east=" + str(east) + 
+            "&outputFormat=AAIGrid&API_Key=" + api_key
         )
         
         req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
@@ -143,10 +146,15 @@ def compute_p2p_endpoint():
 
         grid_size = 300
         api_key = "d58e9f652fa6e05bef48afa87c718844"
+        
+        # Clean, explicit concatenation
         api_url = (
-            f"https://portal.opentopography.org/API/globaldem?"
-            f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
-            f"&outputFormat=AAIGrid&API_Key={api_key}"
+            "https://portal.opentopography.org/API/globaldem?"
+            "demtype=SRTMGL1&south=" + str(south) + 
+            "&north=" + str(north) + 
+            "&west=" + str(west) + 
+            "&east=" + str(east) + 
+            "&outputFormat=AAIGrid&API_Key=" + api_key
         )
         
         req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
@@ -262,10 +270,15 @@ def compute_multipoint_endpoint():
 
         grid_size = 300
         api_key = "d58e9f652fa6e05bef48afa87c718844"
+        
+        # Clean, explicit concatenation
         api_url = (
-            f"https://portal.opentopography.org/API/globaldem?"
-            f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
-            f"&outputFormat=AAIGrid&API_Key={api_key}"
+            "https://portal.opentopography.org/API/globaldem?"
+            "demtype=SRTMGL1&south=" + str(south) + 
+            "&north=" + str(north) + 
+            "&west=" + str(west) + 
+            "&east=" + str(east) + 
+            "&outputFormat=AAIGrid&API_Key=" + api_key
         )
         
         req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
