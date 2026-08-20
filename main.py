@@ -31,14 +31,14 @@ def compute_endpoint():
         lon = float(req_data.get("lon", -117.1))
         height = float(req_data.get("height", 2.0))
 
-        # 1. Broad regional bounding box (~35 miles across)
-        span = 0.25
+        # 1. Expanded regional bounding box (~70 miles across / ~35 miles radius)
+        span = 0.5
         south = lat - span
         north = lat + span
         west = lon - span
         east = lon + span
 
-        grid_size = 150
+        grid_size = 300
 
         # 2. Fetch real elevation grid using OpenTopography API with your authenticated key
         elevation_grid = None
@@ -53,7 +53,7 @@ def compute_endpoint():
         print(f"Fetching real DEM from OpenTopography for bounds: S={south}, N={north}, W={west}, E={east}")
         
         req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
-        with urllib.request.urlopen(req, timeout=20) as response:
+        with urllib.request.urlopen(req, timeout=25) as response:
             content = response.read().decode('utf-8')
             
             # Parse ESRI ASCII Grid format returned by OpenTopography
