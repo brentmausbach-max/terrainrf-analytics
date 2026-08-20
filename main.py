@@ -48,17 +48,22 @@ def compute_p2p_endpoint():
                     data_rows.append([float(p) for p in parts])
 
             flat_data = [val for row in data_rows for val in row]
-            elevation_grid = np.array(flat_data[:ncols * nrows], dtype=np.float32).reshape((nrows, ncols))
+            expected_cells = ncols * nrows
+            if len(flat_data) < expected_cells:
+                raise ValueError(f"Elevation data buffer too small: got {len(flat_data)}, expected {expected_cells}")
+            
+            elevation_grid = np.array(flat_data[:expected_cells], dtype=np.float32).reshape((nrows, ncols))
             elevation_grid[elevation_grid < -1000] = 0
 
-        r1 = int((north - lat1) / (north - south) * nrows)
-        c1 = int((lon1 - west) / (east - west) * ncols)
-        r2 = int((north - lat2) / (north - south) * nrows)
-        c2 = int((lon2 - west) / (east - west) * ncols)
+        # Safely map lat/lon to grid indices with strict clipping to prevent IndexError
+        r1 = int(np.clip((north - lat1) / (north - south) * nrows, 0, nrows - 1))
+        c1 = int(np.clip((lon1 - west) / (east - west) * ncols, 0, ncols - 1))
+        r2 = int(np.clip((north - lat2) / (north - south) * nrows, 0, nrows - 1))
+        c2 = int(np.clip((lon2 - west) / (east - west) * ncols, 0, ncols - 1))
 
         num_samples = max(abs(r2 - r1), abs(c2 - c1), 100)
-        rr = np.linspace(r1, r2, num_samples).astype(int)
-        cc = np.linspace(c1, c2, num_samples).astype(int)
+        rr = np.clip(np.linspace(r1, r2, num_samples).astype(int), 0, nrows - 1)
+        cc = np.clip(np.linspace(c1, c2, num_samples).astype(int), 0, ncols - 1)
 
         elev_a = elevation_grid[r1, c1] + h1
         elev_b = elevation_grid[r2, c2] + h2
@@ -70,10 +75,8 @@ def compute_p2p_endpoint():
         ground_elevs = []
         los_elevs = []
 
-        # Approximate total distance in miles using simple haversine or coordinate step approximation
-        # Each sample step fractional distance calculation
         total_deg_dist = np.sqrt((lat2 - lat1)**2 + (lon2 - lon1)**2)
-        total_miles = total_deg_dist * 69.0 # rough conversion factor
+        total_miles = total_deg_dist * 69.0
 
         for i in range(num_samples):
             r, c = rr[i], cc[i]
