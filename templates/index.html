@@ -37,7 +37,7 @@
 </head>
 <body>
     <div id="controls">
-        <!-- Info Banner Card[cite: 3] -->
+        <!-- Info Banner Card -->
         <div class="card shadow-sm mb-3 p-2 bg-light border-0" style="background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef;">
             <h5 class="fw-bold text-primary mb-1" style="font-size: 15px; color: #0d6efd; margin-top: 0;">TerrainRF Analytics</h5>
             <p class="text-muted small mb-2" style="font-size: 11px; color: #6c757d; line-height: 1.3;">
@@ -47,7 +47,7 @@
                 <span class="badge bg-secondary" style="font-size: 9px; background: #6c757d; color: white; padding: 2px 5px; border-radius: 3px;">360° Viewshed</span>
                 <span class="badge bg-secondary" style="font-size: 9px; background: #6c757d; color: white; padding: 2px 5px; border-radius: 3px;">P2P Path</span>
                 <span class="badge bg-secondary" style="font-size: 9px; background: #6c757d; color: white; padding: 2px 5px; border-radius: 3px;">Fresnel</span>
-                <span class="badge bg-secondary" style="font-size: 9px; background: #6c757d; color: white; padding: 2px 5px; border-radius: 3px;">Multi-Hop</span>
+                <span class="badge bg-secondary" style="font-size: 9px; background: #6c757d; color: white; padding: 2px 5px; border-radius: 3px;">Overlap</span>
             </div>
         </div>
 
@@ -57,12 +57,13 @@
                 <option value="viewshed">360° Viewshed</option>
                 <option value="p2p">Point-to-Point Link</option>
                 <option value="multipoint">Multi-Point Chain (A→B→C)</option>
+                <option value="overlap">Coverage Area Overlap</option>
             </select>
         </div>
 
-        <!-- P2P & MultiPoint Height Inputs -->
-        <div class="control-group" id="heightGroup1" style="display: none;">
-            <label id="labelHeight1">Point A Height (m):</label>
+        <!-- Height & Action Inputs -->
+        <div class="control-group" id="heightGroup1">
+            <label id="labelHeight1">Observer Height (m):</label>
             <input type="number" id="obsHeight" value="2.0">
         </div>
 
@@ -121,11 +122,13 @@
     <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
     <script>
         var map = L.map('map').setView([32.88, -116.85], 12);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/*.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(map);
 
         var currentMarker = null, currentOverlay = null;
         var pPoints = [null, null, null];
         var pMarkers = [null, null, null];
+        var overlapStations = [];
+        var overlapMarkers = [];
         var mapLines = [];
         var profileChartInstance = null;
         var lastAnalysisData = null;
@@ -157,6 +160,15 @@
                 document.getElementById('p2pActionGroup').style.display = 'block';
                 document.getElementById('p2pInstructions').style.display = 'block';
                 document.getElementById('p2pInstructions').innerHTML = "<b>Multi-Point Mode:</b> Click A (Radio), B (Repeater), then C (Station).";
+            } else if (mode === 'overlap') {
+                document.getElementById('heightGroup1').style.display = 'block';
+                document.getElementById('heightGroup2').style.display = 'none';
+                document.getElementById('heightGroup3').style.display = 'none';
+                document.getElementById('labelHeight1').innerText = 'Station Height (m):';
+                document.getElementById('fresnelGroup').style.display = 'none';
+                document.getElementById('p2pActionGroup').style.display = 'block';
+                document.getElementById('p2pInstructions').style.display = 'block';
+                document.getElementById('p2pInstructions').innerHTML = "<b>Overlap Mode:</b> Click map to place multiple stations. Click 'Re-run Analysis' to compute combined coverage.";
             } else {
                 document.getElementById('heightGroup1').style.display = 'block';
                 document.getElementById('heightGroup2').style.display = 'none';
@@ -179,6 +191,9 @@
                 if (pMarkers[i]) { map.removeLayer(pMarkers[i]); pMarkers[i] = null; }
                 pPoints[i] = null;
             }
+            overlapMarkers.forEach(m => map.removeLayer(m));
+            overlapMarkers = [];
+            overlapStations = [];
             mapLines.forEach(l => map.removeLayer(l));
             mapLines = [];
             document.getElementById('profileModal').style.display = 'none';
@@ -240,6 +255,10 @@
                     pMarkers[2] = L.marker([lat, lon]).addTo(map).bindPopup("Point C (Station)").openPopup();
                     executeAnalysis();
                 }
+            } else if (mode === 'overlap') {
+                overlapStations.push({lat: lat, lon: lon});
+                var m = L.marker([lat, lon]).addTo(map).bindPopup("Station " + overlapStations.length).openPopup();
+                overlapMarkers.push(m);
             }
         });
 
@@ -290,6 +309,21 @@
                         document.getElementById('btnLeg1').style.display = 'inline-block';
                         document.getElementById('btnLeg2').style.display = 'inline-block';
                         switchLeg(1);
+                    } else alert("Error: " + data.error);
+                });
+            } else if (mode === 'overlap') {
+                if (overlapStations.length === 0) {
+                    alert("Please click the map to place at least one station first.");
+                    return;
+                }
+                fetch('/compute-overlap', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ points: overlapStations, height: h1 })
+                }).then(res => res.json()).then(data => {
+                    if (data.success) {
+                        if (currentOverlay) map.removeLayer(currentOverlay);
+                        currentOverlay = L.imageOverlay(data.overlay_url, data.bounds, { opacity: 0.7 }).addTo(map);
+                        alert("Coverage overlap computed successfully!");
                     } else alert("Error: " + data.error);
                 });
             }
