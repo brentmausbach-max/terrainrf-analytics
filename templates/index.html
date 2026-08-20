@@ -20,12 +20,24 @@
         
         /* Modal Popup Styling for Profile Graph */
         #profileModal {
-            display: none; position: absolute; bottom: 20px; left: 20px; right: 20px; max-width: 800px;
+            display: none; position: absolute; bottom: 20px; left: 20px; right: 20px; max-width: 850px;
             margin: 0 auto; background: white; z-index: 2000; padding: 15px; border-radius: 8px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.3);
         }
         #profileModal h4 { margin: 0 0 10px 0; font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
         #closeModal { cursor: pointer; background: #ddd; border: none; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+        
+        /* Adaptive Operator Insights Box */
+        #operatorInsights {
+            background: #f1f8ff; border-left: 4px solid #007bff; padding: 10px; margin-bottom: 10px;
+            font-size: 13px; color: #333; border-radius: 4px; line-height: 1.4;
+        }
+        #operatorInsights.warning {
+            background: #fff3cd; border-left-color: #ffc107; color: #856404;
+        }
+        #operatorInsights.danger {
+            background: #f8d7da; border-left-color: #dc3545; color: #721c24;
+        }
     </style>
 </head>
 <body>
@@ -54,7 +66,7 @@
             <label style="font-size: 12px;">Frequency (MHz):</label>
             <input type="number" id="freqMhz" value="462.0" style="margin-bottom: 8px;">
             <label style="display: flex; align-items: center; font-weight: normal; font-size: 12px; cursor: pointer;">
-                <input type="checkbox" id="useFresnel" style="width: auto; margin-right: 6px;"> Apply 60% Fresnel Zone
+                <input type="checkbox" id="useFresnel" style="width: auto; margin-right: 6px;" checked> Apply 60% Fresnel Zone
             </label>
         </div>
 
@@ -80,7 +92,8 @@
             <span id="modalTitle">Path Elevation Profile</span>
             <button id="closeModal">X</button>
         </h4>
-        <div style="height: 200px;">
+        <div id="operatorInsights">Evaluating link path...</div>
+        <div style="height: 190px;">
             <canvas id="profileChart"></canvas>
         </div>
     </div>
@@ -269,7 +282,7 @@
                         p2pMarker2.bindPopup(statusText).openPopup();
                     }
 
-                    renderProfileChart(data.chart_data, data.clear, data.max_obstruction_m, useFresnel);
+                    renderProfileChart(data.chart_data, data.clear, data.max_obstruction_m, useFresnel, freqMhz);
                 } else {
                     alert("Server Error: " + data.error);
                 }
@@ -280,11 +293,40 @@
             });
         }
 
-        function renderProfileChart(chartData, isClear, maxObs, useFresnel) {
+        function updateOperatorInsights(isClear, maxObs, useFresnel, freqMhz) {
+            var box = document.getElementById('operatorInsights');
+            var text = "";
+            
+            box.className = ""; // reset classes
+
+            if (isClear) {
+                box.classList.add(""); // default info style
+                text = "<b>Operator Summary:</b> Excellent path! Direct line-of-sight is fully open";
+                if (useFresnel) {
+                    text += ` and the 60% Fresnel zone clearance requirement at ${freqMhz} MHz is fully respected by the underlying terrain. Signal propagation should be clean and reliable.`;
+                } else {
+                    text += ". (Note: Fresnel zone checking is currently turned off; ensure tree canopies or buildings aren't grazing the lower signal path).";
+                }
+            } else {
+                box.classList.add("danger");
+                text = `<b>Operator Summary: Link Blocked.</b> The path is obstructed by a maximum margin of <b>${maxObs.toFixed(1)} meters</b> `;
+                if (useFresnel) {
+                    text += `breaking into the 60% Fresnel clearance envelope for ${freqMhz} MHz. `;
+                } else {
+                    text += `above the direct line-of-sight vector. `;
+                }
+                text += "<b>Recommendation:</b> Try increasing Tower A or Receiver B antenna heights to punch above the terrain ridge.";
+            }
+            box.innerHTML = text;
+        }
+
+        function renderProfileChart(chartData, isClear, maxObs, useFresnel, freqMhz) {
             document.getElementById('profileModal').style.display = 'block';
-            var titleText = isClear ? "Path Elevation Profile — LINK CLEAR" : "Path Elevation Profile — BLOCKED (Max Obstruction: " + maxObs.toFixed(1) + "m)";
+            var titleText = isClear ? "Path Elevation Profile — LINK CLEAR" : "Path Elevation Profile — BLOCKED";
             if (useFresnel) titleText += " [Fresnel Active]";
             document.getElementById('modalTitle').innerText = titleText;
+
+            updateOperatorInsights(isClear, maxObs, useFresnel, freqMhz);
 
             var ctx = document.getElementById('profileChart').getContext('2d');
             if (profileChartInstance) {
