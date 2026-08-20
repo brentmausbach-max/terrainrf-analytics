@@ -122,7 +122,8 @@
     <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
     <script>
         var map = L.map('map').setView([32.88, -116.85], 12);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/*.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(map);
+        // Fixed tile layer URL format back to standard {z}/{x}/{y}
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(map);
 
         var currentMarker = null, currentOverlay = null;
         var pPoints = [null, null, null];
