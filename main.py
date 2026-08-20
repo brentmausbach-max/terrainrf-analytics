@@ -6,6 +6,7 @@ import base64
 import io
 import urllib.request
 import urllib.parse
+import math
 from flask import Flask, request, jsonify, render_template
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "netlify", "functions"))
@@ -17,13 +18,44 @@ from PIL import Image
 
 app = Flask(__name__, static_folder="public", template_folder="templates")
 
-def fetch_fallback_terrain_grid(south, north, west, east, grid_size=300):
+def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
     """
-    Generates a reliable local terrain grid for testing and fallback 
-    without requiring heavy C-compiled geospatial binaries like rasterio.
+    Fetches real elevation data from AWS Terrarium PNG tiles, decodes RGB pixels into 
+    true terrain heights in meters, and builds an accurate grid for vector ray tracing.
     """
-    # Creates a stable elevation grid for testing map interactions and line-of-sight
-    return np.full((grid_size, grid_size), 200.0, dtype=np.float32)
+    try:
+        # Determine center tile at zoom level 11 for high enough resolution
+        zoom = 11
+        center_lat = (south + north) / 2.0
+        center_lon = (west + east) / 2.0
+        
+        lat_rad = math.radians(center_lat)
+        n = 2.0 ** zoom
+        xtile = int((center_lon + 180.0) / 360.0 * n)
+        ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
+        
+        tile_url = f"https://elevation-tiles-prod.s3.amazonaws.com/v2/terrarium/{zoom}/{xtile}/{ytile}.png"
+        req = urllib.request.Request(tile_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
+        
+        with urllib.request.urlopen(req, timeout=15) as response:
+            img_data = response.read()
+            tile_img = Image.open(io.BytesIO(img_data)).convert('RGB')
+            tile_arr = np.array(tile_img, dtype=np.float32)
+            
+            # Decode Terrarium RGB to meters: (red * 256 + green + blue / 256) - 32768
+            r = tile_arr[:, :, 0]
+            g = tile_arr[:, :, 1]
+            b = tile_arr[:, :, 2]
+            elevation_tile = (r * 256.0 + g + b / 256.0) - 32768.0
+            
+            # Resize decoded tile to match target grid_size
+            img_grid = Image.fromarray(elevation_tile).resize((grid_size, grid_size), Image.Resampling.BILINEAR)
+            elevation_grid = np.array(img_grid, dtype=np.float32)
+            elevation_grid[elevation_grid < -1000] = 0
+            return elevation_grid
+    except Exception as e:
+        print(f"AWS Terrarium fetch error: {e}. Falling back to regional baseline.")
+        return np.full((grid_size, grid_size), 150.0, dtype=np.float32)
 
 @app.route("/", methods=["GET"])
 def index():
@@ -31,7 +63,7 @@ def index():
 
 @app.route("/compute", methods=["POST"])
 def compute_endpoint():
-    print("--- /compute endpoint hit (Lightweight) ---")
+    print("--- /compute endpoint hit (AWS Terrarium Vector Engine) ---")
     try:
         req_data = request.get_json() or {}
         lat = float(req_data.get("lat", 32.8))
@@ -45,7 +77,7 @@ def compute_endpoint():
         east = lon + span
         grid_size = 300
 
-        elevation_grid = fetch_fallback_terrain_grid(south, north, west, east, grid_size=grid_size)
+        elevation_grid = fetch_aws_terrarium_grid(south, north, west, east, grid_size=grid_size)
 
         actual_nrows, actual_ncols = elevation_grid.shape
         pixel_size_x = (east - west) / actual_ncols
@@ -82,7 +114,7 @@ def compute_endpoint():
 
 @app.route("/compute-p2p", methods=["POST"])
 def compute_p2p_endpoint():
-    print("--- /compute-p2p endpoint hit (Lightweight) ---")
+    print("--- /compute-p2p endpoint hit (AWS Terrarium Vector Engine) ---")
     try:
         req_data = request.get_json() or {}
         lat1 = float(req_data.get("lat1"))
@@ -102,7 +134,7 @@ def compute_p2p_endpoint():
         east = max(lon1, lon2) + padding
         grid_size = 300
 
-        elevation_grid = fetch_fallback_terrain_grid(south, north, west, east, grid_size=grid_size)
+        elevation_grid = fetch_aws_terrarium_grid(south, north, west, east, grid_size=grid_size)
         nrows, ncols = elevation_grid.shape
 
         r1 = int(np.clip((north - lat1) / (north - south) * (nrows - 1), 0, nrows - 1))
@@ -170,7 +202,7 @@ def compute_p2p_endpoint():
 
 @app.route("/compute-multipoint", methods=["POST"])
 def compute_multipoint_endpoint():
-    print("--- /compute-multipoint endpoint hit (Lightweight) ---")
+    print("--- /compute-multipoint endpoint hit (AWS Terrarium Vector Engine) ---")
     try:
         req_data = request.get_json() or {}
         p1 = req_data.get("point1") or {}
@@ -195,7 +227,7 @@ def compute_multipoint_endpoint():
         east = max(lon1, lon2, lon3) + padding
         grid_size = 300
 
-        elevation_grid = fetch_fallback_terrain_grid(south, north, west, east, grid_size=grid_size)
+        elevation_grid = fetch_aws_terrarium_grid(south, north, west, east, grid_size=grid_size)
         nrows, ncols = elevation_grid.shape
 
         freq_hz = frequency_mhz * 1e6

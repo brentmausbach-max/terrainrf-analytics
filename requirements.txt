@@ -2,4 +2,3 @@ flask
 gunicorn
 numpy
 Pillow
-rasterio
