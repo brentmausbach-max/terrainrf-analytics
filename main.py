@@ -17,82 +17,9 @@ from PIL import Image
 
 app = Flask(__name__, static_folder="public", template_folder="templates")
 
-# Global session cache to keep the fetched SRTM grid steady across legs
-SESSION_CACHE = {
-    "grid": None,
-    "bounds": None
-}
-
 @app.route("/", methods=["GET"])
 def index():
     return render_template("index.html")
-
-def fetch_elevation_grid(south, north, west, east, grid_size=300):
-    global SESSION_CACHE
-    
-    # Check if we already have a valid cached grid covering roughly these bounds
-    if SESSION_CACHE["grid"] is not None and SESSION_CACHE["bounds"] is not None:
-        sb, nb, wb, eb = SESSION_CACHE["bounds"]
-        if abs(sb - south) < 0.05 and abs(nb - north) < 0.05 and abs(wb - west) < 0.05 and abs(eb - east) < 0.05:
-            print("Serving cached elevation grid for session.")
-            return SESSION_CACHE["grid"]
-
-    api_key = "d58e9f652fa6e05bef48afa87c718844"
-    api_url = (
-        f"https://portal.opentopography.org/API/globaldem?"
-        f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
-        f"&outputFormat=AAIGrid&APIKey={api_key}"
-    )
-    try:
-        req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
-        with urllib.request.urlopen(req, timeout=25) as response:
-            content = response.read().decode('utf-8')
-            lines = content.splitlines()
-            data_rows = []
-            
-            for line in lines:
-                parts = line.strip().split()
-                if not parts:
-                    continue
-                if parts[0].lower() in ['ncols', 'nrows', 'xllcorner', 'yllcorner', 'xllcenter', 'yllcenter', 'cellsize', 'nodata_value']:
-                    continue
-                try:
-                    row_vals = [float(p) for p in parts]
-                    data_rows.append(row_vals)
-                except ValueError:
-                    continue
-
-            if len(data_rows) == 0:
-                raise ValueError("No numeric elevation rows parsed from OpenTopography.")
-
-            flat_data = [val for row in data_rows for val in row]
-            grid_array = np.array(flat_data, dtype=np.float32)
-            
-            if grid_array.size >= grid_size * grid_size:
-                elevation_grid = grid_array[:grid_size * grid_size].reshape((grid_size, grid_size))
-            else:
-                temp_dim = int(np.sqrt(grid_array.size))
-                if temp_dim > 1:
-                    img_grid = Image.fromarray(grid_array.reshape((temp_dim, temp_dim))).resize((grid_size, grid_size), Image.Resampling.BILINEAR)
-                    elevation_grid = np.array(img_grid, dtype=np.float32)
-                else:
-                    raise ValueError("Elevation data buffer too small.")
-
-            elevation_grid[elevation_grid < -1000] = 0
-            print("Successfully parsed real OpenTopography SRTM grid!")
-            
-            # Save to session cache
-            SESSION_CACHE["grid"] = elevation_grid
-            SESSION_CACHE["bounds"] = (south, north, west, east)
-            return elevation_grid
-
-    except Exception as e:
-        print(f"ERROR fetching OpenTopography data: {e}. Falling back to baseline terrain.")
-        # If cache exists from prior successful pull, use it as fallback instead of flat 200m
-        if SESSION_CACHE["grid"] is not None:
-            print("Falling back to cached grid.")
-            return SESSION_CACHE["grid"]
-        return np.full((grid_size, grid_size), 200.0, dtype=np.float32)
 
 @app.route("/compute", methods=["POST"])
 def compute_endpoint():
@@ -104,20 +31,75 @@ def compute_endpoint():
         height = float(req_data.get("height", 2.0))
 
         span = 0.5
-        south, north, west, east = lat - span, lat + span, lon - span, lon + span
-        grid_size = 300
+        south = lat - span
+        north = lat + span
+        west = lon - span
+        east = lon + span
 
-        elevation_grid = fetch_elevation_grid(south, north, west, east, grid_size)
+        grid_size = 300
+        elevation_grid = None
+        api_key = "d58e9f652fa6e05bef48afa87c718844"
+        
+        api_url = (
+            f"https://portal.opentopography.org/API/globaldem?"
+            f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
+            f"&outputFormat=AAIGrid&APIKey={api_key}"
+        )
+        
+        req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
+        with urllib.request.urlopen(req, timeout=25) as response:
+            content = response.read().decode('utf-8')
+            lines = content.splitlines()
+            data_rows = []
+            header_parsed = False
+            ncols = grid_size
+            nrows = grid_size
+            
+            for line in lines:
+                parts = line.strip().split()
+                if not parts:
+                    continue
+                if not header_parsed:
+                    if parts[0].lower() == 'ncols':
+                        ncols = int(parts[1])
+                    elif parts[0].lower() == 'nrows':
+                        nrows = int(parts[1])
+                    elif parts[0].lower() in ['xllcorner', 'yllcorner', 'xllcenter', 'yllcenter', 'cellsize', 'nodata_value']:
+                        pass
+                    else:
+                        header_parsed = True
+                        row_vals = [float(p) for p in parts]
+                        data_rows.append(row_vals)
+                else:
+                    row_vals = [float(p) for p in parts]
+                    data_rows.append(row_vals)
+            
+            if len(data_rows) > 0:
+                flat_data = [val for row in data_rows for val in row]
+                if len(flat_data) >= ncols * nrows:
+                    elevation_grid = np.array(flat_data[:ncols * nrows], dtype=np.float32).reshape((nrows, ncols))
+                    elevation_grid[elevation_grid < -1000] = 0
+
+        if elevation_grid is None or elevation_grid.size == 0:
+            raise ValueError("Failed to parse valid elevation grid from OpenTopography response.")
+
+        if elevation_grid.shape != (grid_size, grid_size):
+            img_grid = Image.fromarray(elevation_grid).resize((grid_size, grid_size), Image.Resampling.BILINEAR)
+            elevation_grid = np.array(img_grid, dtype=np.float32)
+
         actual_nrows, actual_ncols = elevation_grid.shape
         pixel_size_x = (east - west) / actual_ncols
         pixel_size_y = (north - south) / actual_nrows
         window_transform = [pixel_size_x, 0, west, 0, -pixel_size_y, north]
 
+        observer_row = int(actual_nrows / 2)
+        observer_col = int(actual_ncols / 2)
+
         mask = compute_viewshed_matrix(
             elevation_grid=elevation_grid,
             window_transform=window_transform,
-            observer_row=int(actual_nrows / 2),
-            observer_col=int(actual_ncols / 2),
+            observer_row=observer_row,
+            observer_col=observer_col,
             observer_height_m=height,
             max_radius_pixels=int(actual_ncols / 2)
         )
@@ -134,12 +116,48 @@ def compute_endpoint():
 
         return jsonify({
             "success": True,
-            "bounds": [[south, west], [north, east]],
+            "bounds": [
+                [south, west],
+                [north, east]
+            ],
             "overlay_url": data_uri
         })
     except Exception as e:
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+def fetch_p2p_elevation_grid(south, north, west, east, grid_size=300):
+    api_key = "d58e9f652fa6e05bef48afa87c718844"
+    api_url = (
+        f"https://portal.opentopography.org/API/globaldem?"
+        f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
+        f"&outputFormat=AAIGrid&APIKey={api_key}"
+    )
+    req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
+    with urllib.request.urlopen(req, timeout=25) as response:
+        content = response.read().decode('utf-8')
+        lines = content.splitlines()
+        data_rows = []
+        for line in lines:
+            parts = line.strip().split()
+            if not parts:
+                continue
+            if parts[0].lower() in ['ncols', 'nrows', 'xllcorner', 'yllcorner', 'xllcenter', 'yllcenter', 'cellsize', 'nodata_value']:
+                continue
+            try:
+                row_vals = [float(p) for p in parts]
+                data_rows.append(row_vals)
+            except ValueError:
+                continue
+
+        flat_data = [val for row in data_rows for val in row]
+        grid_array = np.array(flat_data, dtype=np.float32)
+        if grid_array.size >= grid_size * grid_size:
+            elevation_grid = grid_array[:grid_size * grid_size].reshape((grid_size, grid_size))
+        else:
+            elevation_grid = np.full((grid_size, grid_size), 200.0, dtype=np.float32)
+        elevation_grid[elevation_grid < -1000] = 0
+        return elevation_grid
 
 @app.route("/compute-p2p", methods=["POST"])
 def compute_p2p_endpoint():
@@ -163,7 +181,7 @@ def compute_p2p_endpoint():
         east = max(lon1, lon2) + padding
 
         grid_size = 300
-        elevation_grid = fetch_elevation_grid(south, north, west, east, grid_size)
+        elevation_grid = fetch_p2p_elevation_grid(south, north, west, east, grid_size)
         nrows, ncols = elevation_grid.shape
 
         r1 = int(np.clip((north - lat1) / (north - south) * (nrows - 1), 0, nrows - 1))
@@ -259,7 +277,7 @@ def compute_multipoint_endpoint():
         west = min(lon1, lon2, lon3) - padding
         east = max(lon1, lon2, lon3) + padding
 
-        elevation_grid = fetch_elevation_grid(south, north, west, east, 300)
+        elevation_grid = fetch_p2p_elevation_grid(south, north, west, east, 300)
         nrows, ncols = elevation_grid.shape
         freq_hz = frequency_mhz * 1e6
         wavelength = 300000000.0 / freq_hz if freq_hz > 0 else 0.649
