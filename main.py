@@ -40,6 +40,7 @@ def compute_endpoint():
         elevation_grid = None
         api_key = "d58e9f652fa6e05bef48afa87c718844"
         
+        # Fixed parameter name: APIKey instead of API_Key
         api_url = (
             f"https://portal.opentopography.org/API/globaldem?"
             f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
