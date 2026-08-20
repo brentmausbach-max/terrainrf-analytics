@@ -50,6 +50,11 @@
             <input type="number" id="obsHeight2" value="2.0">
         </div>
 
+        <div class="control-group" id="p2pActionGroup" style="display: none;">
+            <button id="rerunBtn" style="padding: 6px; cursor: pointer; width: 100%; background: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold; margin-bottom: 5px;">Re-run P2P Link</button>
+            <button id="clearP2PBtn" style="padding: 5px; cursor: pointer; width: 100%; background: #6c757d; color: white; border: none; border-radius: 4px;">Reset Points</button>
+        </div>
+
         <div class="control-group">
             <label>Search Location:</label>
             <input type="text" id="searchQuery" placeholder="City, Zip, or Lat,Lon">
@@ -87,6 +92,7 @@
         var currentOverlay = null;
         
         var p2pPoint1 = null;
+        var p2pPoint2 = null;
         var p2pMarker1 = null;
         var p2pMarker2 = null;
         var p2pLine = null;
@@ -99,16 +105,31 @@
             if (mode === 'p2p') {
                 document.getElementById('heightGroup1').querySelector('label').innerText = 'Tower Height A (m):';
                 document.getElementById('heightGroup2').style.display = 'block';
+                document.getElementById('p2pActionGroup').style.display = 'block';
                 document.getElementById('p2pInstructions').style.display = 'block';
             } else {
                 document.getElementById('heightGroup1').querySelector('label').innerText = 'Observer Height (m):';
                 document.getElementById('heightGroup2').style.display = 'none';
+                document.getElementById('p2pActionGroup').style.display = 'none';
                 document.getElementById('p2pInstructions').style.display = 'none';
             }
         });
 
         document.getElementById('closeModal').addEventListener('click', function() {
             document.getElementById('profileModal').style.display = 'none';
+        });
+
+        document.getElementById('clearP2PBtn').addEventListener('click', function() {
+            resetMapLayers();
+            alert("P2P points cleared. Click map to set Point A.");
+        });
+
+        document.getElementById('rerunBtn').addEventListener('click', function() {
+            if (!p2pPoint1 || !p2pPoint2) {
+                alert("Please select both Point A and Point B on the map first.");
+                return;
+            }
+            executeP2PAnalysis();
         });
 
         function resetMapLayers() {
@@ -118,6 +139,7 @@
             if (p2pMarker2) { map.removeLayer(p2pMarker2); p2pMarker2 = null; }
             if (p2pLine) { map.removeLayer(p2pLine); p2pLine = null; }
             p2pPoint1 = null;
+            p2pPoint2 = null;
             document.getElementById('profileModal').style.display = 'none';
         }
 
@@ -187,52 +209,54 @@
                 });
 
             } else {
-                if (!p2pPoint1) {
+                if (!p2pPoint1 || (p2pPoint1 && p2pPoint2)) {
+                    // Start fresh pair
+                    resetMapLayers();
                     p2pPoint1 = { lat: lat, lon: lon };
-                    if (p2pMarker1) map.removeLayer(p2pMarker1);
-                    document.getElementById('profileModal').style.display = 'none';
                     p2pMarker1 = L.marker([lat, lon]).addTo(map).bindPopup("Point A (Tower)").openPopup();
+                    document.getElementById('p2pInstructions').innerText = "Point A set! Now click map for Point B (Receiver).";
                 } else {
-                    var p2pPoint2 = { lat: lat, lon: lon };
-                    if (p2pMarker2) map.removeLayer(p2pMarker2);
+                    p2pPoint2 = { lat: lat, lon: lon };
                     p2pMarker2 = L.marker([lat, lon]).addTo(map).bindPopup("Point B (Receiver)").openPopup();
-
-                    var h1 = document.getElementById('obsHeight').value;
-                    var h2 = document.getElementById('obsHeight2').value;
-
-                    fetch('/compute-p2p', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            lat1: p2pPoint1.lat, lon1: p2pPoint1.lon, h1: h1,
-                            lat2: p2pPoint2.lat, lon2: p2pPoint2.lon, h2: h2
-                        })
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            var lineColor = data.clear ? 'green' : 'red';
-                            var statusText = data.clear ? "<b>Link Clear!</b>" : "<b>Link Blocked!</b> (Max obstruction: " + data.max_obstruction_m.toFixed(1) + "m)";
-                            
-                            if (p2pLine) map.removeLayer(p2pLine);
-                            p2pLine = L.polyline(data.path, { color: lineColor, weight: 4 }).addTo(map);
-                            p2pMarker2.bindPopup(statusText).openPopup();
-
-                            // Render Chart Modal
-                            renderProfileChart(data.chart_data, data.clear, data.max_obstruction_m);
-                        } else {
-                            alert("Server Error: " + data.error);
-                        }
-                        p2pPoint1 = null;
-                    })
-                    .catch(err => {
-                        console.error("P2P fetch error:", err);
-                        alert("Error: " + err.message);
-                        p2pPoint1 = null;
-                    });
+                    document.getElementById('p2pInstructions').innerText = "Both points set! Adjust heights and click 'Re-run P2P Link' anytime.";
+                    
+                    executeP2PAnalysis();
                 }
             }
         });
+
+        function executeP2PAnalysis() {
+            var h1 = document.getElementById('obsHeight').value;
+            var h2 = document.getElementById('obsHeight2').value;
+
+            fetch('/compute-p2p', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lat1: p2pPoint1.lat, lon1: p2pPoint1.lon, h1: h1,
+                    lat2: p2pPoint2.lat, lon2: p2pPoint2.lon, h2: h2
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    var lineColor = data.clear ? 'green' : 'red';
+                    var statusText = data.clear ? "<b>Link Clear!</b>" : "<b>Link Blocked!</b> (Max obstruction: " + data.max_obstruction_m.toFixed(1) + "m)";
+                    
+                    if (p2pLine) map.removeLayer(p2pLine);
+                    p2pLine = L.polyline(data.path, { color: lineColor, weight: 4 }).addTo(map);
+                    p2pMarker2.bindPopup(statusText).openPopup();
+
+                    renderProfileChart(data.chart_data, data.clear, data.max_obstruction_m);
+                } else {
+                    alert("Server Error: " + data.error);
+                }
+            })
+            .catch(err => {
+                console.error("P2P fetch error:", err);
+                alert("Error: " + err.message);
+            });
+        }
 
         function renderProfileChart(chartData, isClear, maxObs) {
             document.getElementById('profileModal').style.display = 'block';
