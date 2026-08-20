@@ -40,11 +40,11 @@ def compute_endpoint():
         elevation_grid = None
         api_key = "d58e9f652fa6e05bef48afa87c718844"
         
-        # Fixed parameter name: APIKey instead of API_Key
+        # OpenTopography requires API_Key with an underscore
         api_url = (
             f"https://portal.opentopography.org/API/globaldem?"
             f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
-            f"&outputFormat=AAIGrid&APIKey={api_key}"
+            f"&outputFormat=AAIGrid&API_Key={api_key}"
         )
         
         req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
@@ -132,7 +132,7 @@ def fetch_p2p_elevation_grid(south, north, west, east, grid_size=300):
     api_url = (
         f"https://portal.opentopography.org/API/globaldem?"
         f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
-        f"&outputFormat=AAIGrid&APIKey={api_key}"
+        f"&outputFormat=AAIGrid&API_Key={api_key}"
     )
     req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
     with urllib.request.urlopen(req, timeout=25) as response:
