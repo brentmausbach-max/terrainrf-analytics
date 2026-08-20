@@ -38,22 +38,22 @@ def compute_endpoint():
         west = lon - span
         east = lon + span
 
-        grid_size = 150  # Lowered slightly to ensure fast, lightweight grid transfer
+        grid_size = 150
 
-        # 2. Fetch real elevation grid using OpenTopography's public SRTM/USGS global raster API
+        # 2. Fetch real elevation grid using OpenTopography API with your authenticated key
         elevation_grid = None
+        api_key = "d58e9f652fa6e05bef48afa87c718844"
         
-        # OpenTopography free public endpoint for raster bounding box extraction
         api_url = (
             f"https://portal.opentopography.org/API/globaldem?"
-            f"demtype=USGS10m&south={south}&north={north}&west={west}&east={east}"
-            f"&outputFormat=AAIGrid&API_Key=public"
+            f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
+            f"&outputFormat=AAIGrid&API_Key={api_key}"
         )
         
         print(f"Fetching real DEM from OpenTopography for bounds: S={south}, N={north}, W={west}, E={east}")
         
         req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
-        with urllib.request.urlopen(req, timeout=15) as response:
+        with urllib.request.urlopen(req, timeout=20) as response:
             content = response.read().decode('utf-8')
             
             # Parse ESRI ASCII Grid format returned by OpenTopography
@@ -75,7 +75,6 @@ def compute_endpoint():
                     elif parts[0].lower() in ['xllcorner', 'yllcorner', 'xllcenter', 'yllcenter', 'cellsize', 'nodata_value']:
                         pass
                     else:
-                        # Reached data rows
                         header_parsed = True
                         row_vals = [float(p) for p in parts]
                         data_rows.append(row_vals)
@@ -87,15 +86,12 @@ def compute_endpoint():
                 flat_data = [val for row in data_rows for val in row]
                 if len(flat_data) >= ncols * nrows:
                     elevation_grid = np.array(flat_data[:ncols * nrows], dtype=np.float32).reshape((nrows, ncols))
-                    # Handle NoData flags (often -9999)
                     elevation_grid[elevation_grid < -1000] = 0
 
         if elevation_grid is None or elevation_grid.size == 0:
-            raise ValueError("Failed to parse valid elevation grid from elevation provider.")
+            raise ValueError("Failed to parse valid elevation grid from OpenTopography response.")
 
-        # Resize grid if necessary to match standard grid_size
         if elevation_grid.shape != (grid_size, grid_size):
-            # Simple resize via PIL or NumPy interpolation if dimensions differ slightly
             img_grid = Image.fromarray(elevation_grid).resize((grid_size, grid_size), Image.Resampling.BILINEAR)
             elevation_grid = np.array(img_grid, dtype=np.float32)
 
