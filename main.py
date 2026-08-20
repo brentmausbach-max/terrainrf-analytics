@@ -17,13 +17,27 @@ from PIL import Image
 
 app = Flask(__name__, static_folder="public", template_folder="templates")
 
+# Global session cache to keep the fetched SRTM grid steady across legs
+SESSION_CACHE = {
+    "grid": None,
+    "bounds": None
+}
+
 @app.route("/", methods=["GET"])
 def index():
     return render_template("index.html")
 
 def fetch_elevation_grid(south, north, west, east, grid_size=300):
+    global SESSION_CACHE
+    
+    # Check if we already have a valid cached grid covering roughly these bounds
+    if SESSION_CACHE["grid"] is not None and SESSION_CACHE["bounds"] is not None:
+        sb, nb, wb, eb = SESSION_CACHE["bounds"]
+        if abs(sb - south) < 0.05 and abs(nb - north) < 0.05 and abs(wb - west) < 0.05 and abs(eb - east) < 0.05:
+            print("Serving cached elevation grid for session.")
+            return SESSION_CACHE["grid"]
+
     api_key = "d58e9f652fa6e05bef48afa87c718844"
-    # Corrected parameter name: APIKey instead of API_Key
     api_url = (
         f"https://portal.opentopography.org/API/globaldem?"
         f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
@@ -66,10 +80,18 @@ def fetch_elevation_grid(south, north, west, east, grid_size=300):
 
             elevation_grid[elevation_grid < -1000] = 0
             print("Successfully parsed real OpenTopography SRTM grid!")
+            
+            # Save to session cache
+            SESSION_CACHE["grid"] = elevation_grid
+            SESSION_CACHE["bounds"] = (south, north, west, east)
             return elevation_grid
 
     except Exception as e:
         print(f"ERROR fetching OpenTopography data: {e}. Falling back to baseline terrain.")
+        # If cache exists from prior successful pull, use it as fallback instead of flat 200m
+        if SESSION_CACHE["grid"] is not None:
+            print("Falling back to cached grid.")
+            return SESSION_CACHE["grid"]
         return np.full((grid_size, grid_size), 200.0, dtype=np.float32)
 
 @app.route("/compute", methods=["POST"])
@@ -144,7 +166,6 @@ def compute_p2p_endpoint():
         elevation_grid = fetch_elevation_grid(south, north, west, east, grid_size)
         nrows, ncols = elevation_grid.shape
 
-        # Correct latitude mapping so row 0 is North and row nrows-1 is South
         r1 = int(np.clip((north - lat1) / (north - south) * (nrows - 1), 0, nrows - 1))
         c1 = int(np.clip((lon1 - west) / (east - west) * (ncols - 1), 0, ncols - 1))
         r2 = int(np.clip((north - lat2) / (north - south) * (nrows - 1), 0, nrows - 1))
