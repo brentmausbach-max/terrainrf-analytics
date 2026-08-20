@@ -3,6 +3,8 @@ import os
 import sys
 import time
 import traceback
+import base64
+import io
 from flask import Flask, request, jsonify, render_template
 
 # Point Python directly to the netlify/functions directory so it finds spatial_bounds and viewshed_engine
@@ -40,7 +42,6 @@ def compute_endpoint():
         # 2. Build a stable, high-performance elevation grid locally
         grid_size = 200
         xx, yy = np.meshgrid(np.linspace(-3, 3, grid_size), np.linspace(-3, 3, grid_size))
-        # Generate realistic undulating terrain (hills/valleys) based on coordinates
         elevation_grid = 300 + (np.sin(xx) * 120 + np.cos(yy) * 120) + (np.sin(xx * 0.5) * 50)
         
         pixel_size_x = (east - west) / grid_size
@@ -50,7 +51,7 @@ def compute_endpoint():
         observer_row = int(grid_size / 2)
         observer_col = int(grid_size / 2)
 
-        # 3. Run the ray-casting matrix computation safely[cite: 1, 3]
+        # 3. Run the ray-casting matrix computation safely
         mask = compute_viewshed_matrix(
             elevation_grid=elevation_grid,
             window_transform=window_transform,
@@ -60,34 +61,25 @@ def compute_endpoint():
             max_radius_pixels=int(grid_size / 2)
         )
 
-        # 4. Create an RGBA image with CalTopo-style red shading
+        # 4. Create an RGBA image in memory using PIL and encode as base64 data URI
         img_array = np.zeros((grid_size, grid_size, 4), dtype=np.uint8)
         img_array[mask == 1] = [200, 0, 0, 160]  # Semi-transparent red fill
         img_array[mask == 0] = [0, 0, 0, 0]      # Transparent background
 
-        os.makedirs("static", exist_ok=True)
-        file_id = int(time.time() * 1000)
-        overlay_filename = f"overlay_{file_id}.png"
-        overlay_path = os.path.join("static", overlay_filename)
-        
-        for f in os.listdir("static"):
-            if f.startswith("overlay_") and f.endswith(".png"):
-                try:
-                    os.remove(os.path.join("static", f))
-                except:
-                    pass
-
         img = Image.fromarray(img_array, "RGBA")
-        img.save(overlay_path)
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        encoded_img = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        data_uri = f"data:image/png;base64,{encoded_img}"
 
-        # 5. Return successful bounds and the unique overlay filename to frontend[cite: 1, 3]
+        # 5. Return successful bounds and the base64 data URI directly to the frontend
         return jsonify({
             "success": True,
             "bounds": [
                 [south, west],
                 [north, east]
             ],
-            "overlay_url": f"/static/{overlay_filename}"
+            "overlay_url": data_uri
         })
     except Exception as e:
         traceback.print_exc()
