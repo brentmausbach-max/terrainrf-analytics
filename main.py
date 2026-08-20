@@ -126,39 +126,6 @@ def compute_endpoint():
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
-def fetch_p2p_elevation_grid(south, north, west, east, grid_size=300):
-    api_key = "d58e9f652fa6e05bef48afa87c718844"
-    api_url = (
-        f"https://portal.opentopography.org/API/globaldem?"
-        f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
-        f"&outputFormat=AAIGrid&API_Key={api_key}"
-    )
-    req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
-    with urllib.request.urlopen(req, timeout=25) as response:
-        content = response.read().decode('utf-8')
-        lines = content.splitlines()
-        data_rows = []
-        for line in lines:
-            parts = line.strip().split()
-            if not parts:
-                continue
-            if parts[0].lower() in ['ncols', 'nrows', 'xllcorner', 'yllcorner', 'xllcenter', 'yllcenter', 'cellsize', 'nodata_value']:
-                continue
-            try:
-                row_vals = [float(p) for p in parts]
-                data_rows.append(row_vals)
-            except ValueError:
-                continue
-
-        flat_data = [val for row in data_rows for val in row]
-        grid_array = np.array(flat_data, dtype=np.float32)
-        if grid_array.size >= grid_size * grid_size:
-            elevation_grid = grid_array[:grid_size * grid_size].reshape((grid_size, grid_size))
-        else:
-            elevation_grid = np.full((grid_size, grid_size), 200.0, dtype=np.float32)
-        elevation_grid[elevation_grid < -1000] = 0
-        return elevation_grid
-
 @app.route("/compute-p2p", methods=["POST"])
 def compute_p2p_endpoint():
     print("--- /compute-p2p endpoint hit! ---")
@@ -181,7 +148,40 @@ def compute_p2p_endpoint():
         east = max(lon1, lon2) + padding
 
         grid_size = 300
-        elevation_grid = fetch_p2p_elevation_grid(south, north, west, east, grid_size)
+        elevation_grid = None
+        api_key = "d58e9f652fa6e05bef48afa87c718844"
+        
+        api_url = (
+            f"https://portal.opentopography.org/API/globaldem?"
+            f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
+            f"&outputFormat=AAIGrid&API_Key={api_key}"
+        )
+        
+        req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
+        with urllib.request.urlopen(req, timeout=25) as response:
+            content = response.read().decode('utf-8')
+            lines = content.splitlines()
+            data_rows = []
+            for line in lines:
+                parts = line.strip().split()
+                if not parts:
+                    continue
+                if parts[0].lower() in ['ncols', 'nrows', 'xllcorner', 'yllcorner', 'xllcenter', 'yllcenter', 'cellsize', 'nodata_value']:
+                    continue
+                try:
+                    row_vals = [float(p) for p in parts]
+                    data_rows.append(row_vals)
+                except ValueError:
+                    continue
+
+        flat_data = [val for row in data_rows for val in row]
+        grid_array = np.array(flat_data, dtype=np.float32)
+        if grid_array.size >= grid_size * grid_size:
+            elevation_grid = grid_array[:grid_size * grid_size].reshape((grid_size, grid_size))
+        else:
+            elevation_grid = np.full((grid_size, grid_size), 200.0, dtype=np.float32)
+        elevation_grid[elevation_grid < -1000] = 0
+
         nrows, ncols = elevation_grid.shape
 
         r1 = int(np.clip((north - lat1) / (north - south) * (nrows - 1), 0, nrows - 1))
@@ -246,101 +246,6 @@ def compute_p2p_endpoint():
                 "los": los_elevs,
                 "fresnel": fresnel_lower_elevs
             }
-        })
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route("/compute-multipoint", methods=["POST"])
-def compute_multipoint_endpoint():
-    print("--- /compute-multipoint endpoint hit! ---")
-    try:
-        req_data = request.get_json() or {}
-        p1 = req_data.get("point1") or {}
-        p2 = req_data.get("point2") or {}
-        p3 = req_data.get("point3") or {}
-
-        def parse_coord(val, default=0.0):
-            try: return float(val)
-            except (TypeError, ValueError): return default
-
-        lat1, lon1, h1 = parse_coord(p1.get("lat")), parse_coord(p1.get("lon")), parse_coord(p1.get("height"), 2.0)
-        lat2, lon2, h2 = parse_coord(p2.get("lat")), parse_coord(p2.get("lon")), parse_coord(p2.get("height"), 10.0)
-        lat3, lon3, h3 = parse_coord(p3.get("lat")), parse_coord(p3.get("lon")), parse_coord(p3.get("height"), 4.0)
-
-        use_fresnel = bool(req_data.get("use_fresnel", False))
-        frequency_mhz = parse_coord(req_data.get("frequency_mhz"), 462.0)
-
-        padding = 0.1
-        south = min(lat1, lat2, lat3) - padding
-        north = max(lat1, lat2, lat3) + padding
-        west = min(lon1, lon2, lon3) - padding
-        east = max(lon1, lon2, lon3) + padding
-
-        elevation_grid = fetch_p2p_elevation_grid(south, north, west, east, 300)
-        nrows, ncols = elevation_grid.shape
-        freq_hz = frequency_mhz * 1e6
-        wavelength = 300000000.0 / freq_hz if freq_hz > 0 else 0.649
-
-        def analyze_leg(la1, lo1, ht1, la2, lo2, ht2):
-            r1 = int(np.clip((north - la1) / (north - south) * (nrows - 1), 0, nrows - 1))
-            c1 = int(np.clip((lo1 - west) / (east - west) * (ncols - 1), 0, ncols - 1))
-            r2 = int(np.clip((north - la2) / (north - south) * (nrows - 1), 0, nrows - 1))
-            c2 = int(np.clip((lo2 - west) / (east - west) * (ncols - 1), 0, ncols - 1))
-
-            num_samples = max(abs(r2 - r1), abs(c2 - c1), 150)
-            rr = np.clip(np.linspace(r1, r2, num_samples).astype(int), 0, nrows - 1)
-            cc = np.clip(np.linspace(c1, c2, num_samples).astype(int), 0, ncols - 1)
-
-            elev_a = elevation_grid[r1, c1] + ht1
-            elev_b = elevation_grid[r2, c2] + ht2
-
-            clear_leg = True
-            max_obs = 0.0
-            distances, ground_vals, los_vals, fresnel_vals = [], [], [], []
-
-            total_deg_dist = np.sqrt((la2 - la1)**2 + (lo2 - lo1)**2)
-            total_miles = total_deg_dist * 69.0
-            total_meters = total_miles * 1609.34
-
-            for i in range(num_samples):
-                r, c = rr[i], cc[i]
-                fraction = i / num_samples
-                los_elev = elev_a + fraction * (elev_b - elev_a)
-                ground_elev = elevation_grid[r, c]
-                
-                dist_a = fraction * total_meters
-                dist_b = (1.0 - fraction) * total_meters
-
-                f1 = np.sqrt((wavelength * dist_a * dist_b) / total_meters) if (dist_a > 0 and dist_b > 0 and total_meters > 0) else 0.0
-                req_clearance = los_elev - (0.6 * f1 if use_fresnel else 0.0)
-
-                distances.append(round(fraction * total_miles, 2))
-                ground_vals.append(round(float(ground_elev), 1))
-                los_vals.append(round(float(los_elev), 1))
-                fresnel_vals.append(round(float(req_clearance), 1))
-
-                check_base = req_clearance if use_fresnel else los_elev
-                if ground_elev > check_base:
-                    clear_leg = False
-                    margin = ground_elev - check_base
-                    if margin > max_obs: max_obs = margin
-
-            return {
-                "clear": clear_leg,
-                "max_obstruction_m": float(max_obs),
-                "chart_data": { "distances": distances, "ground": ground_vals, "los": los_vals, "fresnel": fresnel_vals }
-            }
-
-        leg1 = analyze_leg(lat1, lon1, h1, lat2, lon2, h2)
-        leg2 = analyze_leg(lat2, lon2, h2, lat3, lon3, h3)
-
-        return jsonify({
-            "success": True,
-            "clear": leg1["clear"] and leg2["clear"],
-            "leg1": leg1,
-            "leg2": leg2,
-            "path": [[float(lat1), float(lon1)], [float(lat2), float(lon2)], [float(lat3), float(lon3)]]
         })
     except Exception as e:
         traceback.print_exc()
