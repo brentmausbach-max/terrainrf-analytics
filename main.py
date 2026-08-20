@@ -30,8 +30,8 @@ def compute_endpoint():
         lon = float(req_data.get("lon", -117.1))
         height = float(req_data.get("height", 2.0))
 
-        # 1. Use a wider regional span (0.3 degrees ~ 20+ miles)
-        span = 0.3
+        # 1. Use a dense regional span (0.03 degrees) for clear CalTopo-style coverage
+        span = 0.03
         south = lat - span
         north = lat + span
         west = lon - span
@@ -58,10 +58,10 @@ def compute_endpoint():
             max_radius_pixels=int(grid_size / 2)
         )
 
-        # 4. Create an RGBA image with transparent background and green visible mask
+        # 4. Create an RGBA image with dense fill and transparent background
         img_array = np.zeros((grid_size, grid_size, 4), dtype=np.uint8)
-        img_array[mask == 1] = [0, 255, 0, 200]  # Bright green visible pixels
-        img_array[mask == 0] = [0, 0, 0, 0]      # Completely transparent background
+        img_array[mask == 1] = [0, 200, 0, 160]  # Solid semi-transparent green fill
+        img_array[mask == 0] = [0, 0, 0, 0]      # Transparent background
 
         os.makedirs("static", exist_ok=True)
         file_id = int(time.time() * 1000)
