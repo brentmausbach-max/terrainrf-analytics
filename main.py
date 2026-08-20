@@ -32,17 +32,17 @@ def compute_endpoint():
         lon = float(req_data.get("lon", -117.1))
         height = float(req_data.get("height", 2.0))
 
-        # 1. Use a clean regional span
-        span = 0.03
+        # 1. Expanded regional span for broad radio coverage (~35 miles across)
+        span = 0.25
         south = lat - span
         north = lat + span
         west = lon - span
         east = lon + span
 
-        # 2. Build a stable, high-performance elevation grid locally
-        grid_size = 200
-        xx, yy = np.meshgrid(np.linspace(-3, 3, grid_size), np.linspace(-3, 3, grid_size))
-        elevation_grid = 300 + (np.sin(xx) * 120 + np.cos(yy) * 120) + (np.sin(xx * 0.5) * 50)
+        # 2. High-performance elevation grid with 300x300 resolution
+        grid_size = 300
+        xx, yy = np.meshgrid(np.linspace(-6, 6, grid_size), np.linspace(-6, 6, grid_size))
+        elevation_grid = 300 + (np.sin(xx) * 150 + np.cos(yy) * 150) + (np.sin(xx * 0.3) * 80)
         
         pixel_size_x = (east - west) / grid_size
         pixel_size_y = (north - south) / grid_size
