@@ -38,38 +38,74 @@ def compute_endpoint():
         west = lon - span
         east = lon + span
 
-        grid_size = 300
+        grid_size = 150  # Lowered slightly to ensure fast, lightweight grid transfer
 
-        # 2. Fetch real elevation grid from USGS 3DEP National Map REST ImageServer
+        # 2. Fetch real elevation grid using OpenTopography's public SRTM/USGS global raster API
         elevation_grid = None
-        try:
-            bbox = f"{west},{south},{east},{north}"
-            url = (
-                f"https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage?"
-                f"bbox={bbox}&bboxSR=4326&imageSR=4326&size={grid_size},{grid_size}&format=json&f=json"
-            )
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=10) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                if "pixelBlock" in res_data and "pixels" in res_data["pixelBlock"]:
-                    pixels = res_data["pixelBlock"]["pixels"]
-                    if len(pixels) > 0 and "values" in pixels[0]:
-                        raw_vals = pixels[0]["values"]
-                        elevation_grid = np.array(raw_vals, dtype=np.float32).reshape((grid_size, grid_size))
-        except Exception as api_err:
-            print("USGS API fetch error, falling back to safe topography grid:", api_err)
+        
+        # OpenTopography free public endpoint for raster bounding box extraction
+        api_url = (
+            f"https://portal.opentopography.org/API/globaldem?"
+            f"demtype=USGS10m&south={south}&north={north}&west={west}&east={east}"
+            f"&outputFormat=AAIGrid&API_Key=public"
+        )
+        
+        print(f"Fetching real DEM from OpenTopography for bounds: S={south}, N={north}, W={west}, E={east}")
+        
+        req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
+        with urllib.request.urlopen(req, timeout=15) as response:
+            content = response.read().decode('utf-8')
+            
+            # Parse ESRI ASCII Grid format returned by OpenTopography
+            lines = content.splitlines()
+            data_rows = []
+            header_parsed = False
+            ncols = grid_size
+            nrows = grid_size
+            
+            for line in lines:
+                parts = line.strip().split()
+                if not parts:
+                    continue
+                if not header_parsed:
+                    if parts[0].lower() == 'ncols':
+                        ncols = int(parts[1])
+                    elif parts[0].lower() == 'nrows':
+                        nrows = int(parts[1])
+                    elif parts[0].lower() in ['xllcorner', 'yllcorner', 'xllcenter', 'yllcenter', 'cellsize', 'nodata_value']:
+                        pass
+                    else:
+                        # Reached data rows
+                        header_parsed = True
+                        row_vals = [float(p) for p in parts]
+                        data_rows.append(row_vals)
+                else:
+                    row_vals = [float(p) for p in parts]
+                    data_rows.append(row_vals)
+            
+            if len(data_rows) > 0:
+                flat_data = [val for row in data_rows for val in row]
+                if len(flat_data) >= ncols * nrows:
+                    elevation_grid = np.array(flat_data[:ncols * nrows], dtype=np.float32).reshape((nrows, ncols))
+                    # Handle NoData flags (often -9999)
+                    elevation_grid[elevation_grid < -1000] = 0
 
-        # Fallback if network or API limits fail
-        if elevation_grid is None or np.all(elevation_grid == 0):
-            xx, yy = np.meshgrid(np.linspace(-6, 6, grid_size), np.linspace(-6, 6, grid_size))
-            elevation_grid = 300 + (np.sin(xx) * 150 + np.cos(yy) * 150) + (np.sin(xx * 0.3) * 80)
+        if elevation_grid is None or elevation_grid.size == 0:
+            raise ValueError("Failed to parse valid elevation grid from elevation provider.")
 
-        pixel_size_x = (east - west) / grid_size
-        pixel_size_y = (north - south) / grid_size
+        # Resize grid if necessary to match standard grid_size
+        if elevation_grid.shape != (grid_size, grid_size):
+            # Simple resize via PIL or NumPy interpolation if dimensions differ slightly
+            img_grid = Image.fromarray(elevation_grid).resize((grid_size, grid_size), Image.Resampling.BILINEAR)
+            elevation_grid = np.array(img_grid, dtype=np.float32)
+
+        actual_nrows, actual_ncols = elevation_grid.shape
+        pixel_size_x = (east - west) / actual_ncols
+        pixel_size_y = (north - south) / actual_nrows
         window_transform = [pixel_size_x, 0, west, 0, -pixel_size_y, north]
 
-        observer_row = int(grid_size / 2)
-        observer_col = int(grid_size / 2)
+        observer_row = int(actual_nrows / 2)
+        observer_col = int(actual_ncols / 2)
 
         # 3. Run true 360-degree ray-casting matrix computation against real terrain data
         mask = compute_viewshed_matrix(
@@ -78,11 +114,11 @@ def compute_endpoint():
             observer_row=observer_row,
             observer_col=observer_col,
             observer_height_m=height,
-            max_radius_pixels=int(grid_size / 2)
+            max_radius_pixels=int(actual_ncols / 2)
         )
 
         # 4. Create RGBA overlay image in memory
-        img_array = np.zeros((grid_size, grid_size, 4), dtype=np.uint8)
+        img_array = np.zeros((actual_nrows, actual_ncols, 4), dtype=np.uint8)
         img_array[mask == 1] = [200, 0, 0, 160]  # Semi-transparent red radio coverage
         img_array[mask == 0] = [0, 0, 0, 0]      # Transparent background
 
