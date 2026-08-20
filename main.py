@@ -297,5 +297,71 @@ def compute_multipoint_endpoint():
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route("/compute-overlap", methods=["POST"])
+def compute_overlap_endpoint():
+    print("--- /compute-overlap endpoint hit ---")
+    try:
+        req_data = request.get_json() or {}
+        points = req_data.get("points", [])
+        height = float(req_data.get("height", 2.0))
+
+        if not points:
+            return jsonify({"success": False, "error": "No points provided for overlap analysis."}), 400
+
+        lats = [float(p.get("lat", 32.8)) for p in points]
+        lons = [float(p.get("lon", -117.1)) for p in points]
+
+        padding = 0.4
+        south = min(lats) - padding
+        north = max(lats) + padding
+        west = min(lons) - padding
+        east = max(lons) + padding
+        grid_size = 300
+
+        elevation_grid = fetch_aws_terrarium_grid(south, north, west, east, grid_size=grid_size)
+        actual_nrows, actual_ncols = elevation_grid.shape
+
+        pixel_size_x = (east - west) / actual_ncols
+        pixel_size_y = (north - south) / actual_nrows
+        window_transform = [pixel_size_x, 0, west, 0, -pixel_size_y, north]
+
+        combined_mask = np.zeros((actual_nrows, actual_ncols), dtype=np.int32)
+
+        for pt in points:
+            plat = float(pt.get("lat"))
+            plon = float(pt.get("lon"))
+            
+            row = int(np.clip((north - plat) / (north - south) * (actual_nrows - 1), 0, actual_nrows - 1))
+            col = int(np.clip((plon - west) / (east - west) * (actual_ncols - 1), 0, actual_ncols - 1))
+
+            mask = compute_viewshed_matrix(
+                elevation_grid=elevation_grid,
+                window_transform=window_transform,
+                observer_row=row,
+                observer_col=col,
+                observer_height_m=height,
+                max_radius_pixels=int(actual_ncols / 2)
+            )
+            combined_mask += mask
+
+        img_array = np.zeros((actual_nrows, actual_ncols, 4), dtype=np.uint8)
+        img_array[combined_mask == 1] = [0, 120, 255, 120]
+        img_array[combined_mask > 1] = [40, 200, 40, 180]
+
+        img = Image.fromarray(img_array, "RGBA")
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        encoded_img = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        data_uri = f"data:image/png;base64,{encoded_img}"
+
+        return jsonify({
+            "success": True,
+            "bounds": [[south, west], [north, east]],
+            "overlay_url": data_uri
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=True)
