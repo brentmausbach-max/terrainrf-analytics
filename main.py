@@ -39,11 +39,11 @@ def compute_endpoint():
         grid_size = 300
         api_key = "d58e9f652fa6e05bef48afa87c718844"
         
-        # Corrected parameter: APIKey without underscore
+        # Restored API_Key with underscore
         api_url = (
             f"https://portal.opentopography.org/API/globaldem?"
             f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
-            f"&outputFormat=AAIGrid&APIKey={api_key}"
+            f"&outputFormat=AAIGrid&API_Key={api_key}"
         )
         
         req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
@@ -146,7 +146,7 @@ def compute_p2p_endpoint():
         api_url = (
             f"https://portal.opentopography.org/API/globaldem?"
             f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
-            f"&outputFormat=AAIGrid&APIKey={api_key}"
+            f"&outputFormat=AAIGrid&API_Key={api_key}"
         )
         
         req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
@@ -167,8 +167,7 @@ def compute_p2p_endpoint():
                     continue
 
         flat_data = [val for row in data_rows for val in row]
-        grid_array = np.array(flat_data, dtype=np.float32)
-        elevation_grid = grid_array[:grid_size * grid_size].reshape((grid_size, grid_size)) if grid_array.size >= grid_size * grid_size else np.full((grid_size, grid_size), 200.0, dtype=np.float32)
+        elevation_grid = grid_array[:grid_size * grid_size].reshape((grid_size, grid_size)) if (grid_array := np.array(flat_data, dtype=np.float32)).size >= grid_size * grid_size else np.full((grid_size, grid_size), 200.0, dtype=np.float32)
         elevation_grid[elevation_grid < -1000] = 0
         nrows, ncols = elevation_grid.shape
 
@@ -266,7 +265,7 @@ def compute_multipoint_endpoint():
         api_url = (
             f"https://portal.opentopography.org/API/globaldem?"
             f"demtype=SRTMGL1&south={south}&north={north}&west={west}&east={east}"
-            f"&outputFormat=AAIGrid&APIKey={api_key}"
+            f"&outputFormat=AAIGrid&API_Key={api_key}"
         )
         
         req = urllib.request.Request(api_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
