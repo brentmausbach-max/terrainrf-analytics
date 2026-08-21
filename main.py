@@ -28,7 +28,6 @@ def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
         lon_span = east - west
         max_span = max(lat_span, lon_span)
 
-        # Automatically scale zoom level for high fidelity based on span size
         if max_span < 0.1:
             zoom = 14
         elif max_span < 0.3:
@@ -179,6 +178,11 @@ def compute_p2p_endpoint():
         c1 = int(np.clip((lon1 - west) / (east - west) * (ncols - 1), 0, ncols - 1))
         r2 = int(np.clip((north - lat2) / (north - south) * (nrows - 1), 0, nrows - 1))
         c2 = int(np.clip((lon2 - west) / (east - west) * (ncols - 1), 0, ncols - 1))
+
+        # --- COPILOT DIAGNOSTIC DEBUG PRINT ---
+        print(f"DEBUG DEM ENDPOINTS -> Point 1 ({lat1}, {lon1}): {elevation_grid[r1, c1]:.1f} meters")
+        print(f"DEBUG DEM ENDPOINTS -> Point 2 ({lat2}, {lon2}): {elevation_grid[r2, c2]:.1f} meters")
+        # --------------------------------------
 
         num_samples = max(abs(r2 - r1), abs(c2 - c1), 150)
         rr = np.clip(np.linspace(r1, r2, num_samples).astype(int), 0, nrows - 1)
