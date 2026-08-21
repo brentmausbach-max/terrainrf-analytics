@@ -607,14 +607,25 @@
                     alert("Please fill out or click all three points (Home A, Repeater, Friend C).");
                     return;
                 }
-                fetch('/compute-multipoint', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        point1: {lat: pPoints[0].lat, lon: pPoints[0].lon, height: h1},
-                        point2: {lat: pPoints[1].lat, lon: pPoints[1].lon, height: h2},
-                        point3: {lat: pPoints[2].lat, lon: pPoints[2].lon, height: h3},
-                        use_fresnel: useFresnel, frequency_mhz: freqMhz
-                    })
+                var lats = [pPoints[0].lat, pPoints[1].lat, pPoints[2].lat];
+                var lons = [pPoints[0].lon, pPoints[1].lon, pPoints[2].lon];
+                var padding = 0.1;
+                var south = Math.min(...lats) - padding;
+                var north = Math.max(...lats) + padding;
+                var west = Math.min(...lons) - padding;
+                var east = Math.max(...lons) + padding;
+
+                fetchElevationGridClientSide(south, north, west, east).then(gridPayload => {
+                    return fetch('/compute-multipoint-client', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            ...gridPayload,
+                            point1: {lat: pPoints[0].lat, lon: pPoints[0].lon, height: h1},
+                            point2: {lat: pPoints[1].lat, lon: pPoints[1].lon, height: h2},
+                            point3: {lat: pPoints[2].lat, lon: pPoints[2].lon, height: h3},
+                            use_fresnel: useFresnel, frequency_mhz: freqMhz
+                        })
+                    });
                 }).then(res => res.json()).then(data => {
                     if (data.success) {
                         mapLines.forEach(l => map.removeLayer(l));
