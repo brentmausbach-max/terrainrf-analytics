@@ -26,17 +26,13 @@ def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
     like Mount Woodson (~2,880 ft) are never smoothed out.
     """
     try:
-        # Use a high-resolution zoom level to ensure fine-grained detail
         zoom = 13
         n = 2.0 ** zoom
 
-        # Create coordinate arrays for the requested grid size
         lats = np.linspace(north, south, grid_size)  # Top to bottom
         lons = np.linspace(west, east, grid_size)    # Left to right
         
         elevation_grid = np.zeros((grid_size, grid_size), dtype=np.float32)
-        
-        # Cache loaded tiles to avoid redundant network calls for neighboring points
         tile_cache = {}
 
         for r_idx, lat in enumerate(lats):
@@ -57,7 +53,6 @@ def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
                             r = tile_arr[:, :, 0]
                             g = tile_arr[:, :, 1]
                             b = tile_arr[:, :, 2]
-                            # Decode meters
                             tile_elev = (r * 256.0 + g + b / 256.0) - 32768.0
                             tile_cache[tile_key] = tile_elev
                     except Exception:
@@ -65,7 +60,6 @@ def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
 
                 tile_elev = tile_cache[tile_key]
                 if tile_elev is not None:
-                    # Calculate exact pixel position within this 256x256 tile
                     lon_left = xtile / n * 360.0 - 180.0
                     lon_right = (xtile + 1) / n * 360.0 - 180.0
                     lat_top = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * ytile / n))))
@@ -269,21 +263,29 @@ def compute_multipoint_endpoint():
         elevation_grid = fetch_aws_terrarium_grid(south, north, west, east, grid_size=grid_size)
         nrows, ncols = elevation_grid.shape
 
+        def get_grid_idx(la, lo):
+            r = int(np.clip((north - la) / (north - south) * (nrows - 1), 0, nrows - 1))
+            c = int(np.clip((lo - west) / (east - west) * (ncols - 1), 0, ncols - 1))
+            return r, c
+
+        r1, c1 = get_grid_idx(lat1, lon1)
+        r2, c2 = get_grid_idx(lat2, lon2)
+        r3, c3 = get_grid_idx(lat3, lon3)
+
+        print(f"DEBUG MULTIPOINT -> Point 1 (Home A): {elevation_grid[r1, c1]:.1f} m")
+        print(f"DEBUG MULTIPOINT -> Point 2 (Repeater): {elevation_grid[r2, c2]:.1f} m")
+        print(f"DEBUG MULTIPOINT -> Point 3 (Friend C): {elevation_grid[r3, c3]:.1f} m")
+
         freq_hz = frequency_mhz * 1e6
         wavelength = 300000000.0 / freq_hz if freq_hz > 0 else 0.649
 
-        def analyze_leg(la1, lo1, ht1, la2, lo2, ht2):
-            r1 = int(np.clip((north - la1) / (north - south) * (nrows - 1), 0, nrows - 1))
-            c1 = int(np.clip((lo1 - west) / (east - west) * (ncols - 1), 0, ncols - 1))
-            r2 = int(np.clip((north - la2) / (north - south) * (nrows - 1), 0, nrows - 1))
-            c2 = int(np.clip((lo2 - west) / (east - west) * (ncols - 1), 0, ncols - 1))
+        def analyze_leg(r_start, c_start, ht_start, r_end, c_end, ht_end, la1, lo1, la2, lo2):
+            num_samples = max(abs(r_end - r_start), abs(c_end - c_start), 150)
+            rr = np.clip(np.linspace(r_start, r_end, num_samples).astype(int), 0, nrows - 1)
+            cc = np.clip(np.linspace(c_start, c_end, num_samples).astype(int), 0, ncols - 1)
 
-            num_samples = max(abs(r2 - r1), abs(c2 - c1), 150)
-            rr = np.clip(np.linspace(r1, r2, num_samples).astype(int), 0, nrows - 1)
-            cc = np.clip(np.linspace(c1, c2, num_samples).astype(int), 0, ncols - 1)
-
-            elev_a = elevation_grid[r1, c1] + ht1
-            elev_b = elevation_grid[r2, c2] + ht2
+            elev_a = elevation_grid[r_start, c_start] + ht_start
+            elev_b = elevation_grid[r_end, c_end] + ht_end
 
             clear_leg = True
             max_obs = 0.0
@@ -328,8 +330,8 @@ def compute_multipoint_endpoint():
                 "chart_data": { "distances": distances, "ground": ground_vals, "los": los_vals, "fresnel": fresnel_vals }
             }
 
-        leg1 = analyze_leg(lat1, lon1, h1, lat2, lon2, h2)
-        leg2 = analyze_leg(lat2, lon2, h2, lat3, lon3, h3)
+        leg1 = analyze_leg(r1, c1, h1, r2, c2, h2, lat1, lon1, lat2, lon2)
+        leg2 = analyze_leg(r2, c2, h2, r3, c3, h3, lat2, lon2, lat3, lon3)
 
         return jsonify({
             "success": True,
