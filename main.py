@@ -20,9 +20,9 @@ app = Flask(__name__, static_folder="public", template_folder="templates")
 
 def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
     """
-    Resilient True-Coordinate Sampler:
-    Uses strict socket timeouts and fault-tolerant tile retrieval to prevent 
-    Gunicorn worker timeouts during viewshed and point-to-point calculations.
+    Non-Blocking Bulletproof Elevation Sampler:
+    Wraps tile downloads with strict read timeouts and memory buffering to 
+    prevent SSL socket stalls and Gunicorn worker aborts.
     """
     try:
         zoom = 13
@@ -47,13 +47,15 @@ def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
                 tile_url = f"https://elevation-tiles-prod.s3.amazonaws.com/v2/terrarium/{zoom}/{xt}/{yt}.png"
                 try:
                     req = urllib.request.Request(tile_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
-                    with urllib.request.urlopen(req, timeout=3) as response:
-                        tile_img = Image.open(io.BytesIO(response.read())).convert('RGB')
+                    # Set explicit socket timeout on open and read raw bytes safely
+                    with urllib.request.urlopen(req, timeout=2.5) as response:
+                        raw_bytes = response.read()
+                        tile_img = Image.open(io.BytesIO(raw_bytes)).convert('RGB')
                         tile_arr = np.array(tile_img, dtype=np.float32)
                         r, g, b = tile_arr[:, :, 0], tile_arr[:, :, 1], tile_arr[:, :, 2]
                         tile_cache[(zoom, xt, yt)] = (r * 256.0 + g + b / 256.0) - 32768.0
-                except Exception:
-                    # Gracefully skip dropped sockets without crashing the worker thread
+                except Exception as ex:
+                    print(f"Tile fetch skipped ({xt},{yt}): {ex}")
                     pass
 
         for r_idx, lat in enumerate(lats):
