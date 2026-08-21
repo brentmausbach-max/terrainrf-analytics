@@ -1,155 +1,703 @@
-import json
-import os
-import sys
-import traceback
-import base64
-import io
-import math
-from flask import Flask, request, jsonify, render_template
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TerrainRF Analytics - Multi-Hop & P2P</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body, html { height: 100%; margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; }
+        #map { width: 100%; height: 100vh; }
+        #controls {
+            position: absolute; top: 10px; right: 10px; z-index: 1000;
+            background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            width: 320px; max-height: 90vh; overflow-y: auto;
+        }
+        .control-group { margin-bottom: 10px; }
+        .control-group label { display: block; font-weight: bold; font-size: 13px; margin-bottom: 3px; }
+        .control-group input, .control-group select { width: 100%; padding: 5px; box-sizing: border-box; }
+        
+        #profileModal {
+            display: none; position: absolute; bottom: 20px; left: 20px; width: 750px; max-width: 90vw;
+            background: white; z-index: 2000; padding: 15px; border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid #ccc;
+        }
+        #modalHeader { cursor: move; user-select: none; }
+        #profileModal h4 { margin: 0 0 10px 0; font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
+        .modal-btns button { cursor: pointer; background: #ddd; border: none; padding: 2px 8px; border-radius: 4px; font-weight: bold; margin-left: 3px; }
+        
+        #operatorInsights {
+            background: #f1f8ff; border-left: 4px solid #007bff; padding: 10px; margin-bottom: 10px;
+            font-size: 13px; color: #333; border-radius: 4px; line-height: 1.4;
+        }
+        #operatorInsights.danger { background: #f8d7da; border-left-color: #dc3545; color: #721c24; }
+        .leg-tab { padding: 4px 10px; cursor: pointer; background: #e2e8f0; border: none; border-radius: 4px; font-weight: bold; margin-right: 5px; font-size: 12px; }
+        .leg-tab.active { background: #007bff; color: white; }
+        
+        .instruction-box {
+            background: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 8px; border-radius: 6px; font-size: 12px; margin-top: 8px; line-height: 1.4;
+        }
+        .address-row { display: flex; gap: 5px; margin-bottom: 5px; }
+        .address-row input { flex: 1; }
+        .address-row button { padding: 5px 10px; cursor: pointer; background: #28a745; color: white; border: none; border-radius: 4px; font-size: 11px; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <div style="background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef; padding: 10px; margin-bottom: 12px;">
+            <h5 style="font-size: 14px; color: #0d6efd; margin: 0 0 4px 0; font-weight: bold;">TerrainRF Analytics</h5>
+            <p style="font-size: 11px; color: #6c757d; margin: 0; line-height: 1.3;">
+                A keyless terrain and radio line-of-sight analysis tool. Compute true vector ray-tracing, 360° viewsheds, point-to-point links, and multi-station coverage overlaps.
+            </p>
+        </div>
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "netlify", "functions"))
+        <div class="control-group">
+            <label>Analysis Mode:</label>
+            <select id="analysisMode">
+                <option value="viewshed">360° Viewshed (Single Station)</option>
+                <option value="p2p">Point-to-Point Link (A → B)</option>
+                <option value="multipoint">Repeater Relay Link (Home A → Repeater → Home B)</option>
+                <option value="overlap">Coverage Area Overlap (Multi-Station)</option>
+            </select>
+        </div>
 
-from spatial_bounds import calculate_search_bounds
-from viewshed_engine import compute_viewshed_matrix
-import numpy as np
-from PIL import Image
+        <div id="modeDescription" style="font-size: 11px; color: #495057; background: #e7f1ff; border-left: 3px solid #0d6efd; padding: 6px 8px; margin-bottom: 10px; border-radius: 4px;">
+            <b>360° Viewshed:</b> Computes line-of-sight visibility across a panoramic radius from a single observer point.
+        </div>
 
-app = Flask(__name__, static_folder="public", template_folder="templates")
+        <div class="control-group" id="addressGroupP2P" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+            <label style="font-size: 12px; margin-bottom: 5px; color: #0d6efd;"><b>Quick Lookup Addresses/Landmarks:</b></label>
+            <div class="address-row">
+                <input type="text" id="p2pAddrA" placeholder="Point A (e.g., Starting Address)">
+                <button onclick="lookupP2PPoint('A')">Find A</button>
+            </div>
+            <div class="address-row">
+                <input type="text" id="p2pAddrB" placeholder="Point B (e.g., Mount Woodson)">
+                <button onclick="lookupP2PPoint('B')">Find B</button>
+            </div>
+        </div>
 
-@app.route("/", methods=["GET"])
-def index():
-    return render_template("index.html")
+        <div class="control-group" id="addressGroupMulti" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+            <label style="font-size: 12px; margin-bottom: 5px; color: #0d6efd;"><b>Quick Lookup Addresses/Landmarks:</b></label>
+            <div class="address-row">
+                <input type="text" id="addrA" placeholder="Point A (e.g., My Address)">
+                <button onclick="lookupPoint('A')">Find A</button>
+            </div>
+            <div class="address-row">
+                <input type="text" id="addrB" placeholder="Repeater (e.g., Mount Woodson)">
+                <button onclick="lookupPoint('B')">Find Repeater</button>
+            </div>
+            <div class="address-row">
+                <input type="text" id="addrC" placeholder="Point C (e.g., Friend Address)">
+                <button onclick="lookupPoint('C')">Find C</button>
+            </div>
+        </div>
 
-@app.route("/compute-matrix", methods=["POST"])
-def compute_matrix_endpoint():
-    print("--- /compute-matrix endpoint hit (Client-Fed Grid) ---")
-    try:
-        req_data = request.get_json() or {}
-        grid_data = req_data.get("elevation_grid")
-        height = float(req_data.get("height", 2.0))
-        south = float(req_data.get("south"))
-        north = float(req_data.get("north"))
-        west = float(req_data.get("west"))
-        east = float(req_data.get("east"))
+        <div class="control-group" id="heightGroup1">
+            <label id="labelHeight1">Observer Height (ft):</label>
+            <input type="number" id="obsHeight" value="6.5">
+        </div>
 
-        if not grid_data:
-            return jsonify({"success": False, "error": "No elevation grid provided."}), 400
+        <div class="control-group" id="heightGroup2" style="display: none;">
+            <label id="labelHeight2">Receiver Height B (ft):</label>
+            <input type="number" id="obsHeight2" value="30.0">
+        </div>
 
-        elevation_grid = np.array(grid_data, dtype=np.float32)
-        actual_nrows, actual_ncols = elevation_grid.shape
+        <div class="control-group" id="heightGroup3" style="display: none;">
+            <label id="labelHeight3">Station Height C (ft):</label>
+            <input type="number" id="obsHeight3" value="13.0">
+        </div>
 
-        pixel_size_x = (east - west) / actual_ncols
-        pixel_size_y = (north - south) / actual_nrows
-        window_transform = [pixel_size_x, 0, west, 0, -pixel_size_y, north]
+        <div class="control-group" id="fresnelGroup" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+            <label style="font-size: 12px;">Frequency (MHz):</label>
+            <input type="number" id="freqMhz" value="462.0" style="margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; font-weight: normal; font-size: 12px; cursor: pointer;">
+                <input type="checkbox" id="useFresnel" style="width: auto; margin-right: 6px;" checked> Apply 60% Fresnel Zone
+            </label>
+        </div>
 
-        mask = compute_viewshed_matrix(
-            elevation_grid=elevation_grid,
-            window_transform=window_transform,
-            observer_row=int(actual_nrows / 2),
-            observer_col=int(actual_ncols / 2),
-            observer_height_m=height,
-            max_radius_pixels=int(actual_ncols / 2)
-        )
+        <div class="control-group" id="p2pActionGroup" style="display: none;">
+            <button id="rerunBtn" style="padding: 6px; cursor: pointer; width: 100%; background: #0d6efd; color: white; border: none; border-radius: 4px; font-weight: bold; margin-bottom: 5px;">Re-run Analysis</button>
+            <button id="clearP2PBtn" style="padding: 5px; cursor: pointer; width: 100%; background: #6c757d; color: white; border: none; border-radius: 4px;">Reset Points</button>
+        </div>
 
-        img_array = np.zeros((actual_nrows, actual_ncols, 4), dtype=np.uint8)
-        img_array[mask == 1] = [200, 0, 0, 160]
-        img_array[mask == 0] = [0, 0, 0, 0]
+        <div class="control-group">
+            <label>General Map Search:</label>
+            <input type="text" id="searchQuery" placeholder="City, Zip, or Lat,Lon">
+            <button id="searchBtn" style="padding: 5px 8px; margin-top: 5px; cursor: pointer; width: 100%;">Go</button>
+        </div>
+        
+        <div id="p2pInstructions" class="instruction-box" style="display: none;">
+            <b>Instructions:</b> Click Map for Point A, then Point B.
+        </div>
+    </div>
 
-        img = Image.fromarray(img_array, "RGBA")
-        buffer = io.BytesIO()
-        img.save(buffer, format="PNG")
-        encoded_img = base64.b64encode(buffer.getvalue()).decode("utf-8")
-        data_uri = f"data:image/png;base64,{encoded_img}"
+    <div id="profileModal">
+        <div id="modalHeader">
+            <h4>
+                <span id="modalTitle">Path Elevation Profile</span>
+                <div class="modal-btns">
+                    <button class="leg-tab active" id="btnLeg1" onclick="switchLeg(1)" style="display:none;">Leg 1: A → B</button>
+                    <button class="leg-tab" id="btnLeg2" onclick="switchLeg(2)" style="display:none;">Leg 2: B → C</button>
+                    <button id="minimizeModal" onclick="toggleMinimize()">_</button>
+                    <button id="closeModal">X</button>
+                </div>
+            </h4>
+        </div>
+        <div id="modalBody">
+            <div id="operatorInsights">Evaluating link path...</div>
+            <div style="height: 180px;">
+                <canvas id="profileChart"></canvas>
+            </div>
+        </div>
+    </div>
 
-        return jsonify({
-            "success": True,
-            "bounds": [[south, west], [north, east]],
-            "overlay_url": data_uri
-        })
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({"success": False, "error": str(e)}), 500
+    <div id="map"></div>
 
-@app.route("/compute-p2p-client", methods=["POST"])
-def compute_p2p_client_endpoint():
-    print("--- /compute-p2p-client endpoint hit ---")
-    try:
-        req_data = request.get_json() or {}
-        elevation_grid = np.array(req_data.get("elevation_grid"), dtype=np.float32)
-        lat1, lon1, h1 = float(req_data.get("lat1")), float(req_data.get("lon1")), float(req_data.get("h1", 2.0))
-        lat2, lon2, h2 = float(req_data.get("lat2")), float(req_data.get("lon2")), float(req_data.get("h2", 2.0))
-        south, north, west, east = float(req_data.get("south")), float(req_data.get("north")), float(req_data.get("west")), float(req_data.get("east"))
-        use_fresnel = bool(req_data.get("use_fresnel", False))
-        frequency_mhz = float(req_data.get("frequency_mhz", 462.0))
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script>
+        var map = L.map('map').setView([32.88, -116.85], 12);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(map);
 
-        nrows, ncols = elevation_grid.shape
-        r1 = int(np.clip((north - lat1) / (north - south) * (nrows - 1), 0, nrows - 1))
-        c1 = int(np.clip((lon1 - west) / (east - west) * (ncols - 1), 0, ncols - 1))
-        r2 = int(np.clip((north - lat2) / (north - south) * (nrows - 1), 0, nrows - 1))
-        c2 = int(np.clip((lon2 - west) / (east - west) * (ncols - 1), 0, ncols - 1))
+        var currentMarker = null, currentOverlay = null;
+        var pPoints = [null, null, null];
+        var pMarkers = [null, null, null];
+        var overlapStations = [];
+        var overlapMarkers = [];
+        var mapLines = [];
+        var profileChartInstance = null;
+        var lastAnalysisData = null;
+        var activeLegIndex = 1;
+        
+        const METERS_TO_FEET = 3.28084;
 
-        num_samples = max(abs(r2 - r1), abs(c2 - c1), 150)
-        rr = np.clip(np.linspace(r1, r2, num_samples).astype(int), 0, nrows - 1)
-        cc = np.clip(np.linspace(c1, c2, num_samples).astype(int), 0, ncols - 1)
+        var modal = document.getElementById('profileModal');
+        var header = document.getElementById('modalHeader');
+        var isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
 
-        elev_a = elevation_grid[r1, c1] + h1
-        elev_b = elevation_grid[r2, c2] + h2
+        header.addEventListener('mousedown', function(e) {
+            isDragging = true;
+            dragOffsetX = e.clientX - modal.offsetLeft;
+            dragOffsetY = e.clientY - modal.offsetTop;
+            e.preventDefault();
+        });
 
-        clear_path = True
-        max_obstruction_margin = 0.0
-        distances, ground_elevs, los_elevs, fresnel_lower_elevs = [], [], [], []
+        document.addEventListener('mousemove', function(e) {
+            if (!isDragging) return;
+            modal.style.left = (e.clientX - dragOffsetX) + 'px';
+            modal.style.top = (e.clientY - dragOffsetY) + 'px';
+            modal.style.bottom = 'auto';
+        });
 
-        total_deg_dist = np.sqrt((lat2 - lat1)**2 + (lon2 - lon1)**2)
-        total_miles = total_deg_dist * 69.0
-        total_meters = total_miles * 1609.34
+        document.addEventListener('mouseup', function() { isDragging = false; });
 
-        freq_hz = frequency_mhz * 1e6
-        wavelength = 300000000.0 / freq_hz if freq_hz > 0 else 0.649
-
-        for i in range(num_samples):
-            r, c = rr[i], cc[i]
-            fraction = i / num_samples
-            dist_a = fraction * total_meters
-            dist_b = (1.0 - fraction) * total_meters
-
-            earth_radius = 6371000.0 * (4.0 / 3.0)
-            earth_bulge = (dist_a * dist_b) / (2.0 * earth_radius)
-
-            line_of_sight_elev = elev_a + fraction * (elev_b - elev_a) - earth_bulge
-            ground_elev = elevation_grid[r, c]
-            
-            f1_radius = np.sqrt((wavelength * dist_a * dist_b) / total_meters) if (dist_a > 0 and dist_b > 0 and total_meters > 0) else 0.0
-            req_clearance = line_of_sight_elev - (0.6 * f1_radius if use_fresnel else 0.0)
-
-            distances.append(round(fraction * total_miles, 2))
-            ground_elevs.append(round(float(ground_elev), 1))
-            los_elevs.append(round(float(line_of_sight_elev), 1))
-            fresnel_lower_elevs.append(round(float(req_clearance), 1))
-
-            check_baseline = req_clearance if use_fresnel else line_of_sight_elev
-            tolerance_margin = (0.4 * f1_radius) if use_fresnel else 0.0
-
-            if ground_elev > (check_baseline + tolerance_margin):
-                clear_path = False
-                margin = ground_elev - (check_baseline + tolerance_margin)
-                if margin > max_obstruction_margin:
-                    max_obstruction_margin = margin
-
-        return jsonify({
-            "success": True,
-            "clear": clear_path,
-            "max_obstruction_m": float(max_obstruction_margin),
-            "path": [[float(lat1), float(lon1)], [float(lat2), float(lon2)]],
-            "chart_data": {
-                "distances": distances,
-                "ground": ground_elevs,
-                "los": los_elevs,
-                "fresnel": fresnel_lower_elevs
+        function toggleMinimize() {
+            var body = document.getElementById('modalBody');
+            var btn = document.getElementById('minimizeModal');
+            if (body.style.display === 'none') {
+                body.style.display = 'block';
+                btn.innerText = '_';
+            } else {
+                body.style.display = 'none';
+                btn.innerText = '+';
             }
-        })
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({"success": False, "error": str(e)}), 500
+        }
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=True)
+        document.getElementById('closeModal').addEventListener('click', function() { modal.style.display = 'none'; });
+
+        const modeDescriptions = {
+            'viewshed': "<b>360° Viewshed:</b> Computes line-of-sight visibility across a panoramic radius from a single observer point. <i>How to use:</i> Click anywhere on the map.",
+            'p2p': "<b>Point-to-Point Link:</b> Evaluates terrain clearance, obstruction height, and Fresnel zones between two transceivers. <br><i>How to use:</i> Type addresses above or click Map for Point A, then Point B.",
+            'multipoint': "<b>Repeater Relay Link:</b> Test if Home A and Friend Home B can talk through a Repeater (Point C). <br><i>How to use:</i> Type addresses above or click map pins sequentially.",
+            'overlap': "<b>Coverage Area Overlap:</b> Combines viewsheds from multiple base stations to find inter-visibility 'sweet spots'. <br><b>How to use:</b><br>1. Click map to drop station pins.<br>2. Click <b>'Re-run Analysis'</b>."
+        };
+
+        document.getElementById('analysisMode').addEventListener('change', function(e) {
+            var mode = e.target.value;
+            resetMapLayers();
+            modal.style.display = 'none';
+            document.getElementById('modeDescription').innerHTML = modeDescriptions[mode];
+            
+            if (mode === 'p2p') {
+                document.getElementById('addressGroupP2P').style.display = 'block';
+                document.getElementById('addressGroupMulti').style.display = 'none';
+                document.getElementById('heightGroup1').style.display = 'block';
+                document.getElementById('heightGroup2').style.display = 'block';
+                document.getElementById('heightGroup3').style.display = 'none';
+                document.getElementById('labelHeight1').innerText = 'Tower Height A (ft):';
+                document.getElementById('labelHeight2').innerText = 'Receiver Height B (ft):';
+                document.getElementById('fresnelGroup').style.display = 'block';
+                document.getElementById('p2pActionGroup').style.display = 'block';
+                document.getElementById('p2pInstructions').style.display = 'block';
+                document.getElementById('p2pInstructions').innerHTML = "<b>Action:</b> Type addresses above or click Map for Point A, then Point B.";
+            } else if (mode === 'multipoint') {
+                document.getElementById('addressGroupP2P').style.display = 'none';
+                document.getElementById('addressGroupMulti').style.display = 'block';
+                document.getElementById('heightGroup1').style.display = 'block';
+                document.getElementById('heightGroup2').style.display = 'block';
+                document.getElementById('heightGroup3').style.display = 'block';
+                document.getElementById('labelHeight1').innerText = 'Home A Height (ft):';
+                document.getElementById('labelHeight2').innerText = 'Repeater Height (ft):';
+                document.getElementById('labelHeight3').innerText = 'Friend Home C Height (ft):';
+                document.getElementById('fresnelGroup').style.display = 'block';
+                document.getElementById('p2pActionGroup').style.display = 'block';
+                document.getElementById('p2pInstructions').style.display = 'block';
+                document.getElementById('p2pInstructions').innerHTML = "<b>Action:</b> Type addresses above or click Map for Home A, Repeater, then Friend Home C.";
+            } else if (mode === 'overlap') {
+                document.getElementById('addressGroupP2P').style.display = 'none';
+                document.getElementById('addressGroupMulti').style.display = 'none';
+                document.getElementById('heightGroup1').style.display = 'block';
+                document.getElementById('heightGroup2').style.display = 'none';
+                document.getElementById('heightGroup3').style.display = 'none';
+                document.getElementById('labelHeight1').innerText = 'Station Height (ft):';
+                document.getElementById('fresnelGroup').style.display = 'none';
+                document.getElementById('p2pActionGroup').style.display = 'block';
+                document.getElementById('p2pInstructions').style.display = 'block';
+                document.getElementById('p2pInstructions').innerHTML = "<b>Action:</b> Click map to place multiple station pins, then click <b>Re-run Analysis</b>.";
+            } else {
+                document.getElementById('addressGroupP2P').style.display = 'none';
+                document.getElementById('addressGroupMulti').style.display = 'none';
+                document.getElementById('heightGroup1').style.display = 'block';
+                document.getElementById('heightGroup2').style.display = 'none';
+                document.getElementById('heightGroup3').style.display = 'none';
+                document.getElementById('labelHeight1').innerText = 'Observer Height (ft):';
+                document.getElementById('fresnelGroup').style.display = 'none';
+                document.getElementById('p2pActionGroup').style.display = 'none';
+                document.getElementById('p2pInstructions').style.display = 'none';
+            }
+        });
+
+        document.getElementById('clearP2PBtn').addEventListener('click', function() { resetMapLayers(); alert("Points cleared."); });
+        document.getElementById('rerunBtn').addEventListener('click', function() { executeAnalysis(); });
+
+        function resetMapLayers() {
+            if (currentMarker) { map.removeLayer(currentMarker); currentMarker = null; }
+            if (currentOverlay) { map.removeLayer(currentOverlay); currentOverlay = null; }
+            for (let i = 0; i < 3; i++) {
+                if (pMarkers[i]) { map.removeLayer(pMarkers[i]); pMarkers[i] = null; }
+                pPoints[i] = null;
+            }
+            overlapMarkers.forEach(m => map.removeLayer(m));
+            overlapMarkers = [];
+            overlapStations = [];
+            mapLines.forEach(l => map.removeLayer(l));
+            mapLines = [];
+            modal.style.display = 'none';
+        }
+
+        document.getElementById('searchBtn').addEventListener('click', performSearch);
+        document.getElementById('searchQuery').addEventListener('keypress', function(e) { if (e.key === 'Enter') performSearch(); });
+
+        function performSearch() {
+            var q = document.getElementById('searchQuery').value.trim();
+            if (!q) return;
+            fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(q))
+                .then(res => res.json()).then(data => {
+                    if (data && data.length > 0) map.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 12);
+                    else alert("Location not found.");
+                });
+        }
+
+        function lookupP2PPoint(target) {
+            let queryId = target === 'A' ? 'p2pAddrA' : 'p2pAddrB';
+            let q = document.getElementById(queryId).value.trim();
+            if (!q) return;
+
+            fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(q))
+                .then(res => res.json()).then(data => {
+                    if (data && data.length > 0) {
+                        let lat = parseFloat(data[0].lat);
+                        let lon = parseFloat(data[0].lon);
+                        let index = target === 'A' ? 0 : 1;
+                        let label = target === 'A' ? "Point A" : "Point B";
+
+                        if (pMarkers[index]) map.removeLayer(pMarkers[index]);
+                        pPoints[index] = {lat: lat, lon: lon};
+                        pMarkers[index] = L.marker([lat, lon]).addTo(map).bindPopup(label).openPopup();
+                        map.setView([lat, lon], 12);
+
+                        if (pPoints[0] && pPoints[1]) {
+                            executeAnalysis();
+                        }
+                    } else {
+                        alert("Location '" + q + "' not found.");
+                    }
+                });
+        }
+
+        function lookupPoint(target) {
+            let queryId = target === 'A' ? 'addrA' : (target === 'B' ? 'addrB' : 'addrC');
+            let q = document.getElementById(queryId).value.trim();
+            if (!q) return;
+
+            fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(q))
+                .then(res => res.json()).then(data => {
+                    if (data && data.length > 0) {
+                        let lat = parseFloat(data[0].lat);
+                        let lon = parseFloat(data[0].lon);
+                        let index = target === 'A' ? 0 : (target === 'B' ? 1 : 2);
+                        let label = target === 'A' ? "Home A" : (target === 'B' ? "Repeater" : "Friend Home C");
+
+                        if (pMarkers[index]) map.removeLayer(pMarkers[index]);
+                        pPoints[index] = {lat: lat, lon: lon};
+                        pMarkers[index] = L.marker([lat, lon]).addTo(map).bindPopup(label).openPopup();
+                        map.setView([lat, lon], 12);
+
+                        if (pPoints[0] && pPoints[1] && pPoints[2]) {
+                            executeAnalysis();
+                        }
+                    } else {
+                        alert("Location '" + q + "' not found.");
+                    }
+                });
+        }
+
+        // --- Client-Side Tile Fetcher for Viewshed ---
+        async function computeViewshedClientSide(lat, lon, height) {
+            const zoom = 13;
+            const n = Math.pow(2, zoom);
+            
+            const span = 0.5;
+            const south = lat - span, north = lat + span;
+            const west = lon - span, east = lon + span;
+            const gridSize = 300;
+
+            const xMin = Math.floor((west + 180.0) / 360.0 * n);
+            const xMax = Math.floor((east + 180.0) / 360.0 * n);
+            const yMin = Math.floor((1.0 - Math.asinh(Math.tan(north * Math.PI / 180)) / Math.PI) / 2.0 * n);
+            const yMax = Math.floor((1.0 - Math.asinh(Math.tan(south * Math.PI / 180)) / Math.PI) / 2.0 * n);
+
+            const tilePromises = [];
+            const tiles = {};
+
+            for (let x = xMin; x <= xMax; x++) {
+                for (let y = yMin; y <= yMax; y++) {
+                    const url = `https://elevation-tiles-prod.s3.amazonaws.com/v2/terrarium/${zoom}/${x}/${y}.png`;
+                    tilePromises.push(
+                        new Promise((resolve) => {
+                            const img = new Image();
+                            img.crossOrigin = "Anonymous";
+                            img.onload = () => {
+                                const canvas = document.createElement('canvas');
+                                canvas.width = 256; canvas.height = 256;
+                                const ctx = canvas.getContext('2d');
+                                ctx.drawImage(img, 0, 0);
+                                const imgData = ctx.getImageData(0, 0, 256, 256).data;
+                                
+                                const elevMap = new Float32Array(256 * 256);
+                                for (let i = 0; i < imgData.length; i += 4) {
+                                    elevMap[i / 4] = (imgData[i] * 256.0 + imgData[i+1] + imgData[i+2] / 256.0) - 32768.0;
+                                }
+                                tiles[`${x},${y}`] = elevMap;
+                                resolve();
+                            };
+                            img.onerror = () => resolve();
+                            img.src = url;
+                        })
+                    );
+                }
+            }
+
+            await Promise.all(tilePromises);
+
+            const elevationGrid = [];
+            for (let r = 0; r < gridSize; r++) {
+                const row = [];
+                const currLat = north - (r / (gridSize - 1)) * (north - south);
+                const latRad = currLat * Math.PI / 180;
+                const yTile = Math.floor((1.0 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2.0 * n);
+                
+                const latTop = Math.atan(Math.sinh(Math.PI * (1.0 - 2.0 * yTile / n))) * 180 / Math.PI;
+                const latBot = Math.atan(Math.sinh(Math.PI * (1.0 - 2.0 * (yTile + 1) / n))) * 180 / Math.PI;
+
+                for (let c = 0; c < gridSize; c++) {
+                    const currLon = west + (c / (gridSize - 1)) * (east - west);
+                    const xTile = Math.floor((currLon + 180.0) / 360.0 * n);
+                    
+                    const lonLeft = xTile / n * 360.0 - 180.0;
+                    const lonRight = (xTile + 1) / n * 360.0 - 180.0;
+
+                    const tileData = tiles[`${xTile},${yTile}`];
+                    if (tileData) {
+                        const px = Math.min(255, Math.max(0, Math.floor((currLon - lonLeft) / (lonRight - lonLeft) * 256)));
+                        const py = Math.min(255, Math.max(0, Math.floor((latTop - currLat) / (latTop - latBot) * 256)));
+                        row.push(tileData[py * 256 + px]);
+                    } else {
+                        row.push(300.0);
+                    }
+                }
+                elevationGrid.push(row);
+            }
+
+            const response = await fetch('/compute-matrix', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ elevation_grid: elevationGrid, lat, lon, height, south, north, west, east })
+            });
+            return await response.json();
+        }
+
+        // --- Client-Side Tile Fetcher for P2P / Bounding Boxes ---
+        async function fetchElevationGridClientSide(south, north, west, east) {
+            const zoom = 13;
+            const n = Math.pow(2, zoom);
+            const gridSize = 300;
+
+            const xMin = Math.floor((west + 180.0) / 360.0 * n);
+            const xMax = Math.floor((east + 180.0) / 360.0 * n);
+            const yMin = Math.floor((1.0 - Math.asinh(Math.tan(north * Math.PI / 180)) / Math.PI) / 2.0 * n);
+            const yMax = Math.floor((1.0 - Math.asinh(Math.tan(south * Math.PI / 180)) / Math.PI) / 2.0 * n);
+
+            const tilePromises = [];
+            const tiles = {};
+
+            for (let x = xMin; x <= xMax; x++) {
+                for (let y = yMin; y <= yMax; y++) {
+                    const url = `https://elevation-tiles-prod.s3.amazonaws.com/v2/terrarium/${zoom}/${x}/${y}.png`;
+                    tilePromises.push(
+                        new Promise((resolve) => {
+                            const img = new Image();
+                            img.crossOrigin = "Anonymous";
+                            img.onload = () => {
+                                const canvas = document.createElement('canvas');
+                                canvas.width = 256; canvas.height = 256;
+                                const ctx = canvas.getContext('2d');
+                                ctx.drawImage(img, 0, 0);
+                                const imgData = ctx.getImageData(0, 0, 256, 256).data;
+                                
+                                const elevMap = new Float32Array(256 * 256);
+                                for (let i = 0; i < imgData.length; i += 4) {
+                                    elevMap[i / 4] = (imgData[i] * 256.0 + imgData[i+1] + imgData[i+2] / 256.0) - 32768.0;
+                                }
+                                tiles[`${x},${y}`] = elevMap;
+                                resolve();
+                            };
+                            img.onerror = () => resolve();
+                            img.src = url;
+                        })
+                    );
+                }
+            }
+
+            await Promise.all(tilePromises);
+
+            const elevationGrid = [];
+            for (let r = 0; r < gridSize; r++) {
+                const row = [];
+                const currLat = north - (r / (gridSize - 1)) * (north - south);
+                const latRad = currLat * Math.PI / 180;
+                const yTile = Math.floor((1.0 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2.0 * n);
+                
+                const latTop = Math.atan(Math.sinh(Math.PI * (1.0 - 2.0 * yTile / n))) * 180 / Math.PI;
+                const latBot = Math.atan(Math.sinh(Math.PI * (1.0 - 2.0 * (yTile + 1) / n))) * 180 / Math.PI;
+
+                for (let c = 0; c < gridSize; c++) {
+                    const currLon = west + (c / (gridSize - 1)) * (east - west);
+                    const xTile = Math.floor((currLon + 180.0) / 360.0 * n);
+                    
+                    const lonLeft = xTile / n * 360.0 - 180.0;
+                    const lonRight = (xTile + 1) / n * 360.0 - 180.0;
+
+                    const tileData = tiles[`${xTile},${yTile}`];
+                    if (tileData) {
+                        const px = Math.min(255, Math.max(0, Math.floor((currLon - lonLeft) / (lonRight - lonLeft) * 256)));
+                        const py = Math.min(255, Math.max(0, Math.floor((latTop - currLat) / (latTop - latBot) * 256)));
+                        row.push(tileData[py * 256 + px]);
+                    } else {
+                        row.push(300.0);
+                    }
+                }
+                elevationGrid.push(row);
+            }
+            return { elevation_grid: elevationGrid, south, north, west, east };
+        }
+
+        map.on('click', function(e) {
+            var lat = e.latlng.lat, lon = e.latlng.lng;
+            var mode = document.getElementById('analysisMode').value;
+
+            if (mode === 'viewshed') {
+                var hMeters = document.getElementById('obsHeight').value / METERS_TO_FEET;
+                resetMapLayers();
+                currentMarker = L.marker([lat, lon]).addTo(map).bindPopup("Calculating viewshed...").openPopup();
+                
+                computeViewshedClientSide(lat, lon, hMeters).then(data => {
+                    if (data.success) {
+                        currentOverlay = L.imageOverlay(data.overlay_url, data.bounds, { opacity: 0.7 }).addTo(map);
+                        currentMarker.bindPopup("<b>Observer Point</b>").openPopup();
+                    } else alert("Error: " + data.error);
+                }).catch(err => {
+                    alert("Error: " + err);
+                });
+            } else if (mode === 'p2p') {
+                if (!pPoints[0] || pPoints[1]) {
+                    resetMapLayers();
+                    pPoints[0] = {lat: lat, lon: lon};
+                    pMarkers[0] = L.marker([lat, lon]).addTo(map).bindPopup("Point A").openPopup();
+                    document.getElementById('p2pInstructions').innerHTML = "<b>Action:</b> Point A set! Now click Point B.";
+                } else {
+                    pPoints[1] = {lat: lat, lon: lon};
+                    pMarkers[1] = L.marker([lat, lon]).addTo(map).bindPopup("Point B").openPopup();
+                    executeAnalysis();
+                }
+            } else if (mode === 'multipoint') {
+                if (!pPoints[0]) {
+                    resetMapLayers();
+                    pPoints[0] = {lat: lat, lon: lon};
+                    pMarkers[0] = L.marker([lat, lon]).addTo(map).bindPopup("Home A").openPopup();
+                    document.getElementById('p2pInstructions').innerHTML = "<b>Action:</b> Home A set! Now click Repeater location.";
+                } else if (!pPoints[1]) {
+                    pPoints[1] = {lat: lat, lon: lon};
+                    pMarkers[1] = L.marker([lat, lon]).addTo(map).bindPopup("Repeater").openPopup();
+                    document.getElementById('p2pInstructions').innerHTML = "<b>Action:</b> Repeater set! Now click Friend Home C.";
+                } else {
+                    pPoints[2] = {lat: lat, lon: lon};
+                    pMarkers[2] = L.marker([lat, lon]).addTo(map).bindPopup("Friend Home C").openPopup();
+                    executeAnalysis();
+                }
+            } else if (mode === 'overlap') {
+                overlapStations.push({lat: lat, lon: lon});
+                var m = L.marker([lat, lon]).addTo(map).bindPopup("Station " + overlapStations.length).openPopup();
+                overlapMarkers.push(m);
+            }
+        });
+
+        function executeAnalysis() {
+            var mode = document.getElementById('analysisMode').value;
+            var h1 = document.getElementById('obsHeight').value / METERS_TO_FEET;
+            var h2 = document.getElementById('obsHeight2').value / METERS_TO_FEET;
+            var h3 = document.getElementById('obsHeight3').value / METERS_TO_FEET;
+            var useFresnel = document.getElementById('useFresnel').checked;
+            var freqMhz = document.getElementById('freqMhz').value;
+
+            if (mode === 'p2p') {
+                if (!pPoints[0] || !pPoints[1]) {
+                    alert("Please fill out or click both Point A and Point B.");
+                    return;
+                }
+                var padding = 0.1;
+                var south = Math.min(pPoints[0].lat, pPoints[1].lat) - padding;
+                var north = Math.max(pPoints[0].lat, pPoints[1].lat) + padding;
+                var west = Math.min(pPoints[0].lon, pPoints[1].lon) - padding;
+                var east = Math.max(pPoints[0].lon, pPoints[1].lon) + padding;
+
+                fetchElevationGridClientSide(south, north, west, east).then(gridPayload => {
+                    return fetch('/compute-p2p-client', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            ...gridPayload,
+                            lat1: pPoints[0].lat, lon1: pPoints[0].lon, h1: h1,
+                            lat2: pPoints[1].lat, lon2: pPoints[1].lon, h2: h2,
+                            use_fresnel: useFresnel, frequency_mhz: freqMhz
+                        })
+                    });
+                }).then(res => res.json()).then(data => {
+                    if (data.success) {
+                        mapLines.forEach(l => map.removeLayer(l));
+                        mapLines = [L.polyline(data.path, { color: data.clear ? 'green' : 'red', weight: 4 }).addTo(map)];
+                        pMarkers[1].bindPopup(data.clear ? "<b>Link Clear!</b>" : "<b>Blocked!</b>").openPopup();
+                        
+                        lastAnalysisData = { isMulti: false, leg1: data };
+                        document.getElementById('btnLeg1').style.display = 'none';
+                        document.getElementById('btnLeg2').style.display = 'none';
+                        renderProfile(data, "P2P Link Profile", useFresnel, freqMhz);
+                    } else alert("Error: " + data.error);
+                });
+            } else if (mode === 'multipoint') {
+                if (!pPoints[0] || !pPoints[1] || !pPoints[2]) {
+                    alert("Please fill out or click all three points (Home A, Repeater, Friend C).");
+                    return;
+                }
+                fetch('/compute-multipoint', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        point1: {lat: pPoints[0].lat, lon: pPoints[0].lon, height: h1},
+                        point2: {lat: pPoints[1].lat, lon: pPoints[1].lon, height: h2},
+                        point3: {lat: pPoints[2].lat, lon: pPoints[2].lon, height: h3},
+                        use_fresnel: useFresnel, frequency_mhz: freqMhz
+                    })
+                }).then(res => res.json()).then(data => {
+                    if (data.success) {
+                        mapLines.forEach(l => map.removeLayer(l));
+                        mapLines = [
+                            L.polyline([data.path[0], data.path[1]], { color: data.leg1.clear ? 'green' : 'red', weight: 4 }).addTo(map),
+                            L.polyline([data.path[1], data.path[2]], { color: data.leg2.clear ? 'green' : 'red', weight: 4 }).addTo(map)
+                        ];
+                        
+                        lastAnalysisData = { isMulti: true, leg1: data.leg1, leg2: data.leg2, overallClear: data.clear };
+                        document.getElementById('btnLeg1').style.display = 'inline-block';
+                        document.getElementById('btnLeg2').style.display = 'inline-block';
+                        switchLeg(1);
+                    } else alert("Error: " + data.error);
+                });
+            } else if (mode === 'overlap') {
+                if (overlapStations.length === 0) {
+                    alert("Please click the map to place at least one station first.");
+                    return;
+                }
+                fetch('/compute-overlap', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ points: overlapStations, height: h1 })
+                }).then(res => res.json()).then(data => {
+                    if (data.success) {
+                        if (currentOverlay) map.removeLayer(currentOverlay);
+                        currentOverlay = L.imageOverlay(data.overlay_url, data.bounds, { opacity: 0.7 }).addTo(map);
+                        alert("Coverage overlap computed successfully!");
+                    } else alert("Error: " + data.error);
+                });
+            }
+        }
+
+        function switchLeg(legNum) {
+            activeLegIndex = legNum;
+            document.getElementById('btnLeg1').className = legNum === 1 ? "leg-tab active" : "leg-tab";
+            document.getElementById('btnLeg2').className = legNum === 2 ? "leg-tab active" : "leg-tab";
+            
+            var legData = legNum === 1 ? lastAnalysisData.leg1 : lastAnalysisData.leg2;
+            var title = legNum === 1 ? "Relay Leg 1: Home A → Repeater" : "Relay Leg 2: Repeater → Friend Home C";
+            var useFresnel = document.getElementById('useFresnel').checked;
+            var freqMhz = document.getElementById('freqMhz').value;
+            renderProfile(legData, title, useFresnel, freqMhz);
+        }
+
+        function renderProfile(legData, titleText, useFresnel, freqMhz) {
+            modal.style.display = 'block';
+            if (useFresnel) titleText += " [Fresnel Active]";
+            document.getElementById('modalTitle').innerText = titleText;
+
+            let groundFeet = legData.chart_data.ground.map(v => v * METERS_TO_FEET);
+            let losFeet = legData.chart_data.los.map(v => v * METERS_TO_FEET);
+            let fresnelFeet = legData.chart_data.fresnel ? legData.chart_data.fresnel.map(v => v * METERS_TO_FEET) : [];
+            let obstructionFeet = legData.max_obstruction_m * METERS_TO_FEET;
+
+            var box = document.getElementById('operatorInsights');
+            if (legData.clear) {
+                box.className = "";
+                box.innerHTML = `<b>Leg Status: CLEAR.</b> Direct line-of-sight and 60% Fresnel zone clearance (${freqMhz} MHz) are fully maintained.`;
+            } else {
+                box.className = "danger";
+                box.innerHTML = `<b>Leg Status: BLOCKED.</b> Obstruction margin exceeds safety by <b>${obstructionFeet.toFixed(1)} ft</b>.`;
+            }
+
+            var ctx = document.getElementById('profileChart').getContext('2d');
+            if (profileChartInstance) profileChartInstance.destroy();
+
+            var datasets = [
+                { label: 'Ground Elevation (ft)', data: groundFeet, borderColor: 'rgba(100, 100, 100, 1)', backgroundColor: 'rgba(150, 150, 150, 0.2)', fill: true, pointRadius: 0, borderWidth: 2 },
+                { label: 'Line-of-Sight Path (ft)', data: losFeet, borderColor: legData.clear ? 'rgba(0, 200, 0, 1)' : 'rgba(200, 0, 0, 1)', borderDash: [5, 5], pointRadius: 0, borderWidth: 2, fill: false }
+            ];
+
+            if (useFresnel) {
+                datasets.push({ label: '60% Fresnel Limit (ft)', data: fresnelFeet, borderColor: 'rgba(255, 140, 0, 1)', borderDash: [2, 2], pointRadius: 0, borderWidth: 1.5, fill: false });
+            }
+
+            profileChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: { labels: legData.chart_data.distances, datasets: datasets },
+                options: { responsive: true, maintainAspectRatio: false, scales: { x: { title: { display: true, text: 'Distance (miles)' } }, y: { title: { display: true, text: 'Elevation (feet)' } } } }
+            });
+        }
+    </script>
+</body>
+</html>
