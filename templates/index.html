@@ -44,6 +44,7 @@
 </head>
 <body>
     <div id="controls">
+        <!-- Site Info Banner -->
         <div style="background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef; padding: 10px; margin-bottom: 12px;">
             <h5 style="font-size: 14px; color: #0d6efd; margin: 0 0 4px 0; font-weight: bold;">TerrainRF Analytics</h5>
             <p style="font-size: 11px; color: #6c757d; margin: 0; line-height: 1.3;">
@@ -61,11 +62,26 @@
             </select>
         </div>
 
+        <!-- Mode Feature Description Box -->
         <div id="modeDescription" style="font-size: 11px; color: #495057; background: #e7f1ff; border-left: 3px solid #0d6efd; padding: 6px 8px; margin-bottom: 10px; border-radius: 4px;">
             <b>360° Viewshed:</b> Computes line-of-sight visibility across a panoramic radius from a single observer point.
         </div>
 
-        <div class="control-group" id="addressGroup" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+        <!-- Address Inputs for Point-to-Point Mode -->
+        <div class="control-group" id="addressGroupP2P" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+            <label style="font-size: 12px; margin-bottom: 5px; color: #0d6efd;"><b>Quick Lookup Addresses/Landmarks:</b></label>
+            <div class="address-row">
+                <input type="text" id="p2pAddrA" placeholder="Point A (e.g., Starting Address)">
+                <button onclick="lookupP2PPoint('A')">Find A</button>
+            </div>
+            <div class="address-row">
+                <input type="text" id="p2pAddrB" placeholder="Point B (e.g., Mount Woodson)">
+                <button onclick="lookupP2PPoint('B')">Find B</button>
+            </div>
+        </div>
+
+        <!-- Address Inputs for Multipoint / Relay Mode -->
+        <div class="control-group" id="addressGroupMulti" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
             <label style="font-size: 12px; margin-bottom: 5px; color: #0d6efd;"><b>Quick Lookup Addresses/Landmarks:</b></label>
             <div class="address-row">
                 <input type="text" id="addrA" placeholder="Point A (e.g., My Address)">
@@ -81,13 +97,14 @@
             </div>
         </div>
 
+        <!-- Height Inputs -->
         <div class="control-group" id="heightGroup1">
             <label id="labelHeight1">Observer Height (m):</label>
             <input type="number" id="obsHeight" value="2.0">
         </div>
 
         <div class="control-group" id="heightGroup2" style="display: none;">
-            <label id="labelHeight2">Repeater Height B (m):</label>
+            <label id="labelHeight2">Receiver Height B (m):</label>
             <input type="number" id="obsHeight2" value="10.0">
         </div>
 
@@ -115,11 +132,13 @@
             <button id="searchBtn" style="padding: 5px 8px; margin-top: 5px; cursor: pointer; width: 100%;">Go</button>
         </div>
         
+        <!-- Instruction Box -->
         <div id="p2pInstructions" class="instruction-box" style="display: none;">
             <b>Instructions:</b> Click Map for Point A, then Point B.
         </div>
     </div>
 
+    <!-- Profile Graph Modal -->
     <div id="profileModal">
         <h4>
             <span id="modalTitle">Path Elevation Profile</span>
@@ -154,8 +173,8 @@
 
         const modeDescriptions = {
             'viewshed': "<b>360° Viewshed:</b> Computes line-of-sight visibility across a panoramic radius from a single observer point. <i>How to use:</i> Click anywhere on the map.",
-            'p2p': "<b>Point-to-Point Link:</b> Evaluates terrain clearance, obstruction height, and Fresnel zones between two transceivers. <i>How to use:</i> Click Map for Point A, then Point B.",
-            'multipoint': "<b>Repeater Relay Link:</b> Test if Home A and Friend Home B can talk through a Repeater (Point C). <br><i>How to use:</i> Click map pins sequentially (A → Repeater → Friend) OR use the address lookup boxes above.",
+            'p2p': "<b>Point-to-Point Link:</b> Evaluates terrain clearance, obstruction height, and Fresnel zones between two transceivers. <br><i>How to use:</i> Type addresses above or click Map for Point A, then Point B.",
+            'multipoint': "<b>Repeater Relay Link:</b> Test if Home A and Friend Home B can talk through a Repeater (Point C). <br><i>How to use:</i> Type addresses above or click map pins sequentially.",
             'overlap': "<b>Coverage Area Overlap:</b> Combines viewsheds from multiple base stations to find inter-visibility 'sweet spots'. <br><b>How to use:</b><br>1. Click map to drop station pins.<br>2. Click <b>'Re-run Analysis'</b>."
         };
 
@@ -166,7 +185,8 @@
             document.getElementById('modeDescription').innerHTML = modeDescriptions[mode];
             
             if (mode === 'p2p') {
-                document.getElementById('addressGroup').style.display = 'none';
+                document.getElementById('addressGroupP2P').style.display = 'block';
+                document.getElementById('addressGroupMulti').style.display = 'none';
                 document.getElementById('heightGroup1').style.display = 'block';
                 document.getElementById('heightGroup2').style.display = 'block';
                 document.getElementById('heightGroup3').style.display = 'none';
@@ -175,9 +195,10 @@
                 document.getElementById('fresnelGroup').style.display = 'block';
                 document.getElementById('p2pActionGroup').style.display = 'block';
                 document.getElementById('p2pInstructions').style.display = 'block';
-                document.getElementById('p2pInstructions').innerHTML = "<b>Action:</b> Click Map for Point A, then Point B.";
+                document.getElementById('p2pInstructions').innerHTML = "<b>Action:</b> Type addresses above or click Map for Point A, then Point B.";
             } else if (mode === 'multipoint') {
-                document.getElementById('addressGroup').style.display = 'block';
+                document.getElementById('addressGroupP2P').style.display = 'none';
+                document.getElementById('addressGroupMulti').style.display = 'block';
                 document.getElementById('heightGroup1').style.display = 'block';
                 document.getElementById('heightGroup2').style.display = 'block';
                 document.getElementById('heightGroup3').style.display = 'block';
@@ -189,7 +210,8 @@
                 document.getElementById('p2pInstructions').style.display = 'block';
                 document.getElementById('p2pInstructions').innerHTML = "<b>Action:</b> Type addresses above or click Map for Home A, Repeater, then Friend Home C.";
             } else if (mode === 'overlap') {
-                document.getElementById('addressGroup').style.display = 'none';
+                document.getElementById('addressGroupP2P').style.display = 'none';
+                document.getElementById('addressGroupMulti').style.display = 'none';
                 document.getElementById('heightGroup1').style.display = 'block';
                 document.getElementById('heightGroup2').style.display = 'none';
                 document.getElementById('heightGroup3').style.display = 'none';
@@ -199,7 +221,8 @@
                 document.getElementById('p2pInstructions').style.display = 'block';
                 document.getElementById('p2pInstructions').innerHTML = "<b>Action:</b> Click map to place multiple station pins, then click <b>Re-run Analysis</b>.";
             } else {
-                document.getElementById('addressGroup').style.display = 'none';
+                document.getElementById('addressGroupP2P').style.display = 'none';
+                document.getElementById('addressGroupMulti').style.display = 'none';
                 document.getElementById('heightGroup1').style.display = 'block';
                 document.getElementById('heightGroup2').style.display = 'none';
                 document.getElementById('heightGroup3').style.display = 'none';
@@ -242,6 +265,33 @@
                 });
         }
 
+        function lookupP2PPoint(target) {
+            let queryId = target === 'A' ? 'p2pAddrA' : 'p2pAddrB';
+            let q = document.getElementById(queryId).value.trim();
+            if (!q) return;
+
+            fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(q))
+                .then(res => res.json()).then(data => {
+                    if (data && data.length > 0) {
+                        let lat = parseFloat(data[0].lat);
+                        let lon = parseFloat(data[0].lon);
+                        let index = target === 'A' ? 0 : 1;
+                        let label = target === 'A' ? "Point A" : "Point B";
+
+                        if (pMarkers[index]) map.removeLayer(pMarkers[index]);
+                        pPoints[index] = {lat: lat, lon: lon};
+                        pMarkers[index] = L.marker([lat, lon]).addTo(map).bindPopup(label).openPopup();
+                        map.setView([lat, lon], 12);
+
+                        if (pPoints[0] && pPoints[1]) {
+                            executeAnalysis();
+                        }
+                    } else {
+                        alert("Location '" + q + "' not found.");
+                    }
+                });
+        }
+
         function lookupPoint(target) {
             let queryId = target === 'A' ? 'addrA' : (target === 'B' ? 'addrB' : 'addrC');
             let q = document.getElementById(queryId).value.trim();
@@ -260,7 +310,6 @@
                         pMarkers[index] = L.marker([lat, lon]).addTo(map).bindPopup(label).openPopup();
                         map.setView([lat, lon], 12);
 
-                        // If all 3 points are populated via search, execute analysis automatically!
                         if (pPoints[0] && pPoints[1] && pPoints[2]) {
                             executeAnalysis();
                         }
@@ -300,6 +349,7 @@
                 }
             } else if (mode === 'multipoint') {
                 if (!pPoints[0]) {
+                    resetMapLayers();
                     pPoints[0] = {lat: lat, lon: lon};
                     pMarkers[0] = L.marker([lat, lon]).addTo(map).bindPopup("Home A").openPopup();
                     document.getElementById('p2pInstructions').innerHTML = "<b>Action:</b> Home A set! Now click Repeater location.";
@@ -328,7 +378,10 @@
             var freqMhz = document.getElementById('freqMhz').value;
 
             if (mode === 'p2p') {
-                if (!pPoints[0] || !pPoints[1]) return;
+                if (!pPoints[0] || !pPoints[1]) {
+                    alert("Please fill out or click both Point A and Point B.");
+                    return;
+                }
                 fetch('/compute-p2p', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ lat1: pPoints[0].lat, lon1: pPoints[0].lon, h1: h1, lat2: pPoints[1].lat, lon2: pPoints[1].lon, h2: h2, use_fresnel: useFresnel, frequency_mhz: freqMhz })
