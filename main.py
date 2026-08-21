@@ -18,81 +18,81 @@ from PIL import Image
 
 app = Flask(__name__, static_folder="public", template_folder="templates")
 
-def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
+# Global in-memory tile cache to ensure data is fetched upfront and reused
+TILE_CACHE = {}
+
+def prefetch_and_get_grid(south, north, west, east, grid_size=300):
     """
-    Non-Blocking Bulletproof Elevation Sampler:
-    Wraps tile downloads with strict read timeouts and memory buffering to 
-    prevent SSL socket stalls and Gunicorn worker aborts.
+    Upfront Tile Pre-Fetcher & Coordinate Sampler:
+    Downloads and caches all required AWS Terrarium tiles upfront before 
+    any calculation starts, eliminating mid-computation network hangs.
     """
-    try:
-        zoom = 13
-        n = 2.0 ** zoom
+    zoom = 13
+    n = 2.0 ** zoom
 
-        lats = np.linspace(north, south, grid_size)
-        lons = np.linspace(west, east, grid_size)
-        
-        elevation_grid = np.zeros((grid_size, grid_size), dtype=np.float32)
-        tile_cache = {}
+    # Determine unique tile bounds
+    xtile_min = int((west + 180.0) / 360.0 * n)
+    xtile_max = int((east + 180.0) / 360.0 * n)
+    
+    lat_rad_north = math.radians(north)
+    lat_rad_south = math.radians(south)
+    ytile_min = int((1.0 - math.asinh(math.tan(lat_rad_north)) / math.pi) / 2.0 * n)
+    ytile_max = int((1.0 - math.asinh(math.tan(lat_rad_south)) / math.pi) / 2.0 * n)
 
-        xtile_min = int((west + 180.0) / 360.0 * n)
-        xtile_max = int((east + 180.0) / 360.0 * n)
-        
-        lat_rad_north = math.radians(north)
-        lat_rad_south = math.radians(south)
-        ytile_min = int((1.0 - math.asinh(math.tan(lat_rad_north)) / math.pi) / 2.0 * n)
-        ytile_max = int((1.0 - math.asinh(math.tan(lat_rad_south)) / math.pi) / 2.0 * n)
-
-        for xt in range(xtile_min, xtile_max + 1):
-            for yt in range(ytile_min, ytile_max + 1):
+    # 1. Upfront Network Fetch Phase (Isolated from math)
+    for xt in range(xtile_min, xtile_max + 1):
+        for yt in range(ytile_min, ytile_max + 1):
+            t_key = (zoom, xt, yt)
+            if t_key not in TILE_CACHE:
                 tile_url = f"https://elevation-tiles-prod.s3.amazonaws.com/v2/terrarium/{zoom}/{xt}/{yt}.png"
                 try:
                     req = urllib.request.Request(tile_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
-                    # Set explicit socket timeout on open and read raw bytes safely
-                    with urllib.request.urlopen(req, timeout=2.5) as response:
+                    with urllib.request.urlopen(req, timeout=4) as response:
                         raw_bytes = response.read()
                         tile_img = Image.open(io.BytesIO(raw_bytes)).convert('RGB')
                         tile_arr = np.array(tile_img, dtype=np.float32)
                         r, g, b = tile_arr[:, :, 0], tile_arr[:, :, 1], tile_arr[:, :, 2]
-                        tile_cache[(zoom, xt, yt)] = (r * 256.0 + g + b / 256.0) - 32768.0
-                except Exception as ex:
-                    print(f"Tile fetch skipped ({xt},{yt}): {ex}")
-                    pass
+                        TILE_CACHE[t_key] = (r * 256.0 + g + b / 256.0) - 32768.0
+                except Exception as e:
+                    print(f"Upfront tile fetch warning for {t_key}: {e}")
 
-        for r_idx, lat in enumerate(lats):
-            lat_rad = math.radians(lat)
-            ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
-            
-            lat_top = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * ytile / n))))
-            lat_bottom = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * (ytile + 1) / n))))
-            lat_span = lat_top - lat_bottom
-            if lat_span == 0: lat_span = 1.0
+    # 2. Pure Memory Sampling Phase (Zero network dependency)
+    lats = np.linspace(north, south, grid_size)
+    lons = np.linspace(west, east, grid_size)
+    elevation_grid = np.zeros((grid_size, grid_size), dtype=np.float32)
 
-            for c_idx, lon in enumerate(lons):
-                xtile = int((lon + 180.0) / 360.0 * n)
-                t_key = (zoom, xtile, ytile)
+    for r_idx, lat in enumerate(lats):
+        lat_rad = math.radians(lat)
+        ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
+        
+        lat_top = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * ytile / n))))
+        lat_bottom = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * (ytile + 1) / n))))
+        lat_span = lat_top - lat_bottom
+        if lat_span == 0: lat_span = 1.0
 
-                if t_key in tile_cache:
-                    tile_elev = tile_cache[t_key]
-                    lon_left = xtile / n * 360.0 - 180.0
-                    lon_right = (xtile + 1) / n * 360.0 - 180.0
-                    lon_span = lon_right - lon_left
-                    if lon_span == 0: lon_span = 1.0
+        for c_idx, lon in enumerate(lons):
+            xtile = int((lon + 180.0) / 360.0 * n)
+            t_key = (zoom, xtile, ytile)
 
-                    px = int((lon - lon_left) / lon_span * 256)
-                    py = int((lat_top - lat) / lat_span * 256)
+            if t_key in TILE_CACHE:
+                tile_elev = TILE_CACHE[t_key]
+                lon_left = xtile / n * 360.0 - 180.0
+                lon_right = (xtile + 1) / n * 360.0 - 180.0
+                lon_span = lon_right - lon_left
+                if lon_span == 0: lon_span = 1.0
 
-                    px = np.clip(px, 0, 255)
-                    py = np.clip(py, 0, 255)
+                px = int((lon - lon_left) / lon_span * 256)
+                py = int((lat_top - lat) / lat_span * 256)
 
-                    elevation_grid[r_idx, c_idx] = tile_elev[py, px]
-                else:
-                    elevation_grid[r_idx, c_idx] = 300.0
+                px = np.clip(px, 0, 255)
+                py = np.clip(py, 0, 255)
 
-        elevation_grid[elevation_grid < -1000] = 0
-        return elevation_grid
-    except Exception as e:
-        print(f"Grid fetch error recovered: {e}")
-        return np.full((grid_size, grid_size), 300.0, dtype=np.float32)
+                elevation_grid[r_idx, c_idx] = tile_elev[py, px]
+            else:
+                elevation_grid[r_idx, c_idx] = 300.0
+
+    elevation_grid[elevation_grid < -1000] = 0
+    return elevation_grid
 
 @app.route("/", methods=["GET"])
 def index():
@@ -100,7 +100,7 @@ def index():
 
 @app.route("/compute", methods=["POST"])
 def compute_endpoint():
-    print("--- /compute endpoint hit ---")
+    print("--- /compute endpoint hit (Upfront Fetcher) ---")
     try:
         req_data = request.get_json() or {}
         lat = float(req_data.get("lat", 32.8))
@@ -114,7 +114,8 @@ def compute_endpoint():
         east = lon + span
         grid_size = 300
 
-        elevation_grid = fetch_aws_terrarium_grid(south, north, west, east, grid_size=grid_size)
+        # Fetch all tiles upfront before running viewshed math
+        elevation_grid = prefetch_and_get_grid(south, north, west, east, grid_size=grid_size)
 
         actual_nrows, actual_ncols = elevation_grid.shape
         pixel_size_x = (east - west) / actual_ncols
@@ -151,7 +152,7 @@ def compute_endpoint():
 
 @app.route("/compute-p2p", methods=["POST"])
 def compute_p2p_endpoint():
-    print("--- /compute-p2p endpoint hit ---")
+    print("--- /compute-p2p endpoint hit (Upfront Fetcher) ---")
     try:
         req_data = request.get_json() or {}
         lat1 = float(req_data.get("lat1"))
@@ -171,7 +172,7 @@ def compute_p2p_endpoint():
         east = max(lon1, lon2) + padding
         grid_size = 300
 
-        elevation_grid = fetch_aws_terrarium_grid(south, north, west, east, grid_size=grid_size)
+        elevation_grid = prefetch_and_get_grid(south, north, west, east, grid_size=grid_size)
         nrows, ncols = elevation_grid.shape
 
         r1 = int(np.clip((north - lat1) / (north - south) * (nrows - 1), 0, nrows - 1))
@@ -245,7 +246,7 @@ def compute_p2p_endpoint():
 
 @app.route("/compute-multipoint", methods=["POST"])
 def compute_multipoint_endpoint():
-    print("--- /compute-multipoint endpoint hit ---")
+    print("--- /compute-multipoint endpoint hit (Upfront Fetcher) ---")
     try:
         req_data = request.get_json() or {}
         p1 = req_data.get("point1") or {}
@@ -270,7 +271,7 @@ def compute_multipoint_endpoint():
         east = max(lon1, lon2, lon3) + padding
         grid_size = 300
 
-        elevation_grid = fetch_aws_terrarium_grid(south, north, west, east, grid_size=grid_size)
+        elevation_grid = prefetch_and_get_grid(south, north, west, east, grid_size=grid_size)
         nrows, ncols = elevation_grid.shape
 
         def get_grid_idx(la, lo):
@@ -352,7 +353,7 @@ def compute_multipoint_endpoint():
 
 @app.route("/compute-overlap", methods=["POST"])
 def compute_overlap_endpoint():
-    print("--- /compute-overlap endpoint hit ---")
+    print("--- /compute-overlap endpoint hit (Upfront Fetcher) ---")
     try:
         req_data = request.get_json() or {}
         points = req_data.get("points", [])
@@ -371,7 +372,7 @@ def compute_overlap_endpoint():
         east = max(lons) + padding
         grid_size = 300
 
-        elevation_grid = fetch_aws_terrarium_grid(south, north, west, east, grid_size=grid_size)
+        elevation_grid = prefetch_and_get_grid(south, north, west, east, grid_size=grid_size)
         actual_nrows, actual_ncols = elevation_grid.shape
 
         pixel_size_x = (east - west) / actual_ncols
