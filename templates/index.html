@@ -45,7 +45,6 @@
 </head>
 <body>
     <div id="controls">
-        <!-- Site Info Banner -->
         <div style="background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef; padding: 10px; margin-bottom: 12px;">
             <h5 style="font-size: 14px; color: #0d6efd; margin: 0 0 4px 0; font-weight: bold;">TerrainRF Analytics</h5>
             <p style="font-size: 11px; color: #6c757d; margin: 0; line-height: 1.3;">
@@ -63,12 +62,10 @@
             </select>
         </div>
 
-        <!-- Mode Feature Description Box -->
         <div id="modeDescription" style="font-size: 11px; color: #495057; background: #e7f1ff; border-left: 3px solid #0d6efd; padding: 6px 8px; margin-bottom: 10px; border-radius: 4px;">
             <b>360° Viewshed:</b> Computes line-of-sight visibility across a panoramic radius from a single observer point.
         </div>
 
-        <!-- Address Inputs for Point-to-Point Mode -->
         <div class="control-group" id="addressGroupP2P" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
             <label style="font-size: 12px; margin-bottom: 5px; color: #0d6efd;"><b>Quick Lookup Addresses/Landmarks:</b></label>
             <div class="address-row">
@@ -81,7 +78,6 @@
             </div>
         </div>
 
-        <!-- Address Inputs for Multipoint / Relay Mode -->
         <div class="control-group" id="addressGroupMulti" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
             <label style="font-size: 12px; margin-bottom: 5px; color: #0d6efd;"><b>Quick Lookup Addresses/Landmarks:</b></label>
             <div class="address-row">
@@ -98,7 +94,6 @@
             </div>
         </div>
 
-        <!-- Height Inputs -->
         <div class="control-group" id="heightGroup1">
             <label id="labelHeight1">Observer Height (ft):</label>
             <input type="number" id="obsHeight" value="6.5">
@@ -133,13 +128,11 @@
             <button id="searchBtn" style="padding: 5px 8px; margin-top: 5px; cursor: pointer; width: 100%;">Go</button>
         </div>
         
-        <!-- Instruction Box -->
         <div id="p2pInstructions" class="instruction-box" style="display: none;">
             <b>Instructions:</b> Click Map for Point A, then Point B.
         </div>
     </div>
 
-    <!-- Draggable Profile Graph Modal -->
     <div id="profileModal">
         <div id="modalHeader">
             <h4>
@@ -179,7 +172,6 @@
         
         const METERS_TO_FEET = 3.28084;
 
-        // --- Draggable Modal Logic ---
         var modal = document.getElementById('profileModal');
         var header = document.getElementById('modalHeader');
         var isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
@@ -361,7 +353,6 @@
                 });
         }
 
-        // --- Client-Side Tile Fetcher Function ---
         async function computeViewshedClientSide(lat, lon, height) {
             const zoom = 13;
             const n = Math.pow(2, zoom);
@@ -388,16 +379,14 @@
                             img.crossOrigin = "Anonymous";
                             img.onload = () => {
                                 const canvas = document.createElement('canvas');
-                                canvas.width = 256;
-                                canvas.height = 256;
+                                canvas.width = 256; canvas.height = 256;
                                 const ctx = canvas.getContext('2d');
                                 ctx.drawImage(img, 0, 0);
                                 const imgData = ctx.getImageData(0, 0, 256, 256).data;
                                 
                                 const elevMap = new Float32Array(256 * 256);
                                 for (let i = 0; i < imgData.length; i += 4) {
-                                    const r = imgData[i], g = imgData[i+1], b = imgData[i+2];
-                                    elevMap[i / 4] = (r * 256.0 + g + b / 256.0) - 32768.0;
+                                    elevMap[i / 4] = (imgData[i] * 256.0 + imgData[i+1] + imgData[i+2] / 256.0) - 32768.0;
                                 }
                                 tiles[`${x},${y}`] = elevMap;
                                 resolve();
@@ -446,6 +435,80 @@
                 body: JSON.stringify({ elevation_grid: elevationGrid, lat, lon, height, south, north, west, east })
             });
             return await response.json();
+        }
+
+        async function fetchElevationGridClientSide(south, north, west, east) {
+            const zoom = 13;
+            const n = Math.pow(2, zoom);
+            const gridSize = 300;
+
+            const xMin = Math.floor((west + 180.0) / 360.0 * n);
+            const xMax = Math.floor((east + 180.0) / 360.0 * n);
+            const yMin = Math.floor((1.0 - Math.asinh(Math.tan(north * Math.PI / 180)) / Math.PI) / 2.0 * n);
+            const yMax = Math.floor((1.0 - Math.asinh(Math.tan(south * Math.PI / 180)) / Math.PI) / 2.0 * n);
+
+            const tilePromises = [];
+            const tiles = {};
+
+            for (let x = xMin; x <= xMax; x++) {
+                for (let y = yMin; y <= yMax; y++) {
+                    const url = `https://elevation-tiles-prod.s3.amazonaws.com/v2/terrarium/${zoom}/${x}/${y}.png`;
+                    tilePromises.push(
+                        new Promise((resolve) => {
+                            const img = new Image();
+                            img.crossOrigin = "Anonymous";
+                            img.onload = () => {
+                                const canvas = document.createElement('canvas');
+                                canvas.width = 256; canvas.height = 256;
+                                const ctx = canvas.getContext('2d');
+                                ctx.drawImage(img, 0, 0);
+                                const imgData = ctx.getImageData(0, 0, 256, 256).data;
+                                
+                                const elevMap = new Float32Array(256 * 256);
+                                for (let i = 0; i < imgData.length; i += 4) {
+                                    elevMap[i / 4] = (imgData[i] * 256.0 + imgData[i+1] + imgData[i+2] / 256.0) - 32768.0;
+                                }
+                                tiles[`${x},${y}`] = elevMap;
+                                resolve();
+                            };
+                            img.onerror = () => resolve();
+                            img.src = url;
+                        })
+                    );
+                }
+            }
+
+            await Promise.all(tilePromises);
+
+            const elevationGrid = [];
+            for (let r = 0; r < gridSize; r++) {
+                const row = [];
+                const currLat = north - (r / (gridSize - 1)) * (north - south);
+                const latRad = currLat * Math.PI / 180;
+                const yTile = Math.floor((1.0 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2.0 * n);
+                
+                const latTop = Math.atan(Math.sinh(Math.PI * (1.0 - 2.0 * yTile / n))) * 180 / Math.PI;
+                const latBot = Math.atan(Math.sinh(Math.PI * (1.0 - 2.0 * (yTile + 1) / n))) * 180 / Math.PI;
+
+                for (let c = 0; c < gridSize; c++) {
+                    const currLon = west + (c / (gridSize - 1)) * (east - west);
+                    const xTile = Math.floor((currLon + 180.0) / 360.0 * n);
+                    
+                    const lonLeft = xTile / n * 360.0 - 180.0;
+                    const lonRight = (xTile + 1) / n * 360.0 - 180.0;
+
+                    const tileData = tiles[`${xTile},${yTile}`];
+                    if (tileData) {
+                        const px = Math.min(255, Math.max(0, Math.floor((currLon - lonLeft) / (lonRight - lonLeft) * 256)));
+                        const py = Math.min(255, Math.max(0, Math.floor((latTop - currLat) / (latTop - latBot) * 256)));
+                        row.push(tileData[py * 256 + px]);
+                    } else {
+                        row.push(300.0);
+                    }
+                }
+                elevationGrid.push(row);
+            }
+            return { elevation_grid: elevationGrid, south, north, west, east };
         }
 
         map.on('click', function(e) {
@@ -511,9 +574,22 @@
                     alert("Please fill out or click both Point A and Point B.");
                     return;
                 }
-                fetch('/compute-p2p', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ lat1: pPoints[0].lat, lon1: pPoints[0].lon, h1: h1, lat2: pPoints[1].lat, lon2: pPoints[1].lon, h2: h2, use_fresnel: useFresnel, frequency_mhz: freqMhz })
+                var padding = 0.1;
+                var south = Math.min(pPoints[0].lat, pPoints[1].lat) - padding;
+                var north = Math.max(pPoints[0].lat, pPoints[1].lat) + padding;
+                var west = Math.min(pPoints[0].lon, pPoints[1].lon) - padding;
+                var east = Math.max(pPoints[0].lon, pPoints[1].lon) + padding;
+
+                fetchElevationGridClientSide(south, north, west, east).then(gridPayload => {
+                    return fetch('/compute-p2p-client', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            ...gridPayload,
+                            lat1: pPoints[0].lat, lon1: pPoints[0].lon, h1: h1,
+                            lat2: pPoints[1].lat, lon2: pPoints[1].lon, h2: h2,
+                            use_fresnel: useFresnel, frequency_mhz: freqMhz
+                        })
+                    });
                 }).then(res => res.json()).then(data => {
                     if (data.success) {
                         mapLines.forEach(l => map.removeLayer(l));
