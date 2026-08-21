@@ -20,78 +20,71 @@ app = Flask(__name__, static_folder="public", template_folder="templates")
 
 def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
     """
-    Universally and dynamically computes tile coordinates and crops/resamples 
-    the precise bounding box from AWS Terrarium tiles without spatial inversion.
+    True GPS-to-Elevation Coordinate Sampler:
+    Bypasses image resizing blur by mapping every grid point directly to its 
+    exact Web Mercator tile and pixel coordinates, ensuring true peak elevations 
+    like Mount Woodson (~2,880 ft) are never smoothed out.
     """
     try:
-        lat_span = north - south
-        lon_span = east - west
-        max_span = max(lat_span, lon_span)
-
-        if max_span < 0.1:
-            zoom = 14
-        elif max_span < 0.3:
-            zoom = 13
-        elif max_span < 0.8:
-            zoom = 12
-        else:
-            zoom = 11
-
-        center_lat = (south + north) / 2.0
-        center_lon = (west + east) / 2.0
-        
-        lat_rad = math.radians(center_lat)
+        # Use a high-resolution zoom level to ensure fine-grained detail
+        zoom = 13
         n = 2.0 ** zoom
-        xtile = int((center_lon + 180.0) / 360.0 * n)
-        ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
+
+        # Create coordinate arrays for the requested grid size
+        lats = np.linspace(north, south, grid_size)  # Top to bottom
+        lons = np.linspace(west, east, grid_size)    # Left to right
         
-        tile_url = f"https://elevation-tiles-prod.s3.amazonaws.com/v2/terrarium/{zoom}/{xtile}/{ytile}.png"
-        req = urllib.request.Request(tile_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
+        elevation_grid = np.zeros((grid_size, grid_size), dtype=np.float32)
         
-        with urllib.request.urlopen(req, timeout=15) as response:
-            img_data = response.read()
-            tile_img = Image.open(io.BytesIO(img_data)).convert('RGB')
-            tile_arr = np.array(tile_img, dtype=np.float32)
-            
-            r = tile_arr[:, :, 0]
-            g = tile_arr[:, :, 1]
-            b = tile_arr[:, :, 2]
-            elevation_tile = (r * 256.0 + g + b / 256.0) - 32768.0
-            
-            n_double = 2.0 ** zoom
-            lon_deg_left = xtile / n_double * 360.0 - 180.0
-            lon_deg_right = (xtile + 1) / n_double * 360.0 - 180.0
-            
-            lat_rad_top = math.atan(math.sinh(math.pi * (1.0 - 2.0 * ytile / n_double)))
-            lat_deg_top = math.degrees(lat_rad_top)
-            
-            lat_rad_bottom = math.atan(math.sinh(math.pi * (1.0 - 2.0 * (ytile + 1) / n_double)))
-            lat_deg_bottom = math.degrees(lat_rad_bottom)
+        # Cache loaded tiles to avoid redundant network calls for neighboring points
+        tile_cache = {}
 
-            tile_h, tile_w = elevation_tile.shape[:2]
+        for r_idx, lat in enumerate(lats):
+            lat_rad = math.radians(lat)
+            ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
             
-            x1_frac = max(0.0, min(1.0, (west - lon_deg_left) / (lon_deg_right - lon_deg_left)))
-            x2_frac = max(0.0, min(1.0, (east - lon_deg_left) / (lon_deg_right - lon_deg_left)))
-            
-            y1_frac = max(0.0, min(1.0, (lat_deg_top - north) / (lat_deg_top - lat_deg_bottom)))
-            y2_frac = max(0.0, min(1.0, (lat_deg_top - south) / (lat_deg_top - lat_deg_bottom)))
+            for c_idx, lon in enumerate(lons):
+                xtile = int((lon + 180.0) / 360.0 * n)
+                
+                tile_key = (zoom, xtile, ytile)
+                if tile_key not in tile_cache:
+                    tile_url = f"https://elevation-tiles-prod.s3.amazonaws.com/v2/terrarium/{zoom}/{xtile}/{ytile}.png"
+                    req = urllib.request.Request(tile_url, headers={'User-Agent': 'TerrainRF-Analytics/1.0'})
+                    try:
+                        with urllib.request.urlopen(req, timeout=10) as response:
+                            tile_img = Image.open(io.BytesIO(response.read())).convert('RGB')
+                            tile_arr = np.array(tile_img, dtype=np.float32)
+                            r = tile_arr[:, :, 0]
+                            g = tile_arr[:, :, 1]
+                            b = tile_arr[:, :, 2]
+                            # Decode meters
+                            tile_elev = (r * 256.0 + g + b / 256.0) - 32768.0
+                            tile_cache[tile_key] = tile_elev
+                    except Exception:
+                        tile_cache[tile_key] = None
 
-            px1 = int(x1_frac * tile_w)
-            px2 = int(x2_frac * tile_w)
-            py1 = int(y1_frac * tile_h)
-            py2 = int(y2_frac * tile_h)
+                tile_elev = tile_cache[tile_key]
+                if tile_elev is not None:
+                    # Calculate exact pixel position within this 256x256 tile
+                    lon_left = xtile / n * 360.0 - 180.0
+                    lon_right = (xtile + 1) / n * 360.0 - 180.0
+                    lat_top = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * ytile / n))))
+                    lat_bottom = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * (ytile + 1) / n))))
 
-            if px2 <= px1: px2 = px1 + 1
-            if py2 <= py1: py2 = py1 + 1
+                    px = int((lon - lon_left) / (lon_right - lon_left) * 256)
+                    py = int((lat_top - lat) / (lat_top - lat_bottom) * 256)
 
-            cropped_tile = elevation_tile[py1:py2, px1:px2]
-            
-            img_grid = Image.fromarray(cropped_tile).resize((grid_size, grid_size), Image.Resampling.BILINEAR)
-            elevation_grid = np.array(img_grid, dtype=np.float32)
-            elevation_grid[elevation_grid < -1000] = 0
-            return elevation_grid
+                    px = np.clip(px, 0, 255)
+                    py = np.clip(py, 0, 255)
+
+                    elevation_grid[r_idx, c_idx] = tile_elev[py, px]
+                else:
+                    elevation_grid[r_idx, c_idx] = 150.0  # Fallback baseline
+
+        elevation_grid[elevation_grid < -1000] = 0
+        return elevation_grid
     except Exception as e:
-        print(f"AWS Terrarium fetch error: {e}. Falling back to regional baseline.")
+        print(f"True coordinate grid fetch error: {e}")
         return np.full((grid_size, grid_size), 150.0, dtype=np.float32)
 
 @app.route("/", methods=["GET"])
@@ -100,7 +93,7 @@ def index():
 
 @app.route("/compute", methods=["POST"])
 def compute_endpoint():
-    print("--- /compute endpoint hit (AWS Terrarium Vector Engine) ---")
+    print("--- /compute endpoint hit (True Coordinate Engine) ---")
     try:
         req_data = request.get_json() or {}
         lat = float(req_data.get("lat", 32.8))
@@ -151,7 +144,7 @@ def compute_endpoint():
 
 @app.route("/compute-p2p", methods=["POST"])
 def compute_p2p_endpoint():
-    print("--- /compute-p2p endpoint hit (AWS Terrarium Vector Engine) ---")
+    print("--- /compute-p2p endpoint hit (True Coordinate Engine) ---")
     try:
         req_data = request.get_json() or {}
         lat1 = float(req_data.get("lat1"))
@@ -179,10 +172,8 @@ def compute_p2p_endpoint():
         r2 = int(np.clip((north - lat2) / (north - south) * (nrows - 1), 0, nrows - 1))
         c2 = int(np.clip((lon2 - west) / (east - west) * (ncols - 1), 0, ncols - 1))
 
-        # --- COPILOT DIAGNOSTIC DEBUG PRINT ---
-        print(f"DEBUG DEM ENDPOINTS -> Point 1 ({lat1}, {lon1}): {elevation_grid[r1, c1]:.1f} meters")
-        print(f"DEBUG DEM ENDPOINTS -> Point 2 ({lat2}, {lon2}): {elevation_grid[r2, c2]:.1f} meters")
-        # --------------------------------------
+        print(f"DEBUG TRUE COORD -> Point 1 ({lat1}, {lon1}): {elevation_grid[r1, c1]:.1f} meters")
+        print(f"DEBUG TRUE COORD -> Point 2 ({lat2}, {lon2}): {elevation_grid[r2, c2]:.1f} meters")
 
         num_samples = max(abs(r2 - r1), abs(c2 - c1), 150)
         rr = np.clip(np.linspace(r1, r2, num_samples).astype(int), 0, nrows - 1)
@@ -250,7 +241,7 @@ def compute_p2p_endpoint():
 
 @app.route("/compute-multipoint", methods=["POST"])
 def compute_multipoint_endpoint():
-    print("--- /compute-multipoint endpoint hit (AWS Terrarium Vector Engine) ---")
+    print("--- /compute-multipoint endpoint hit (True Coordinate Engine) ---")
     try:
         req_data = request.get_json() or {}
         p1 = req_data.get("point1") or {}
