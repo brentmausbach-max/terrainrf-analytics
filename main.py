@@ -20,11 +20,25 @@ app = Flask(__name__, static_folder="public", template_folder="templates")
 
 def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
     """
-    Fetches real elevation data from AWS Terrarium PNG tiles, decodes RGB pixels into 
-    true terrain heights in meters, and builds an accurate grid for vector ray tracing.
+    Universally and dynamically calculates the ideal Web Mercator zoom level based on 
+    the geographic bounding box span to ensure high-resolution mountain peaks 
+    and ridges are never smoothed out or truncated.
     """
     try:
-        zoom = 11
+        lat_span = north - south
+        lon_span = east - west
+        max_span = max(lat_span, lon_span)
+
+        # Automatically scale zoom level for high fidelity based on span size
+        if max_span < 0.1:
+            zoom = 14  # Hyper-local, ultra-sharp resolution for peaks/trails
+        elif max_span < 0.3:
+            zoom = 13  # Detailed local links
+        elif max_span < 0.8:
+            zoom = 12  # Medium regional paths
+        else:
+            zoom = 11  # Broad cross-county spans
+
         center_lat = (south + north) / 2.0
         center_lon = (west + east) / 2.0
         
