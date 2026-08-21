@@ -20,9 +20,8 @@ app = Flask(__name__, static_folder="public", template_folder="templates")
 
 def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
     """
-    Universally and dynamically calculates the ideal Web Mercator zoom level based on 
-    the geographic bounding box span to ensure high-resolution mountain peaks 
-    and ridges are never smoothed out or truncated.
+    Universally and dynamically computes tile coordinates and crops/resamples 
+    the precise bounding box from AWS Terrarium tiles without spatial inversion.
     """
     try:
         lat_span = north - south
@@ -31,13 +30,13 @@ def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
 
         # Automatically scale zoom level for high fidelity based on span size
         if max_span < 0.1:
-            zoom = 14  # Hyper-local, ultra-sharp resolution for peaks/trails
+            zoom = 14
         elif max_span < 0.3:
-            zoom = 13  # Detailed local links
+            zoom = 13
         elif max_span < 0.8:
-            zoom = 12  # Medium regional paths
+            zoom = 12
         else:
-            zoom = 11  # Broad cross-county spans
+            zoom = 11
 
         center_lat = (south + north) / 2.0
         center_lon = (west + east) / 2.0
@@ -60,7 +59,35 @@ def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
             b = tile_arr[:, :, 2]
             elevation_tile = (r * 256.0 + g + b / 256.0) - 32768.0
             
-            img_grid = Image.fromarray(elevation_tile).resize((grid_size, grid_size), Image.Resampling.BILINEAR)
+            n_double = 2.0 ** zoom
+            lon_deg_left = xtile / n_double * 360.0 - 180.0
+            lon_deg_right = (xtile + 1) / n_double * 360.0 - 180.0
+            
+            lat_rad_top = math.atan(math.sinh(math.pi * (1.0 - 2.0 * ytile / n_double)))
+            lat_deg_top = math.degrees(lat_rad_top)
+            
+            lat_rad_bottom = math.atan(math.sinh(math.pi * (1.0 - 2.0 * (ytile + 1) / n_double)))
+            lat_deg_bottom = math.degrees(lat_rad_bottom)
+
+            tile_h, tile_w = elevation_tile.shape[:2]
+            
+            x1_frac = max(0.0, min(1.0, (west - lon_deg_left) / (lon_deg_right - lon_deg_left)))
+            x2_frac = max(0.0, min(1.0, (east - lon_deg_left) / (lon_deg_right - lon_deg_left)))
+            
+            y1_frac = max(0.0, min(1.0, (lat_deg_top - north) / (lat_deg_top - lat_deg_bottom)))
+            y2_frac = max(0.0, min(1.0, (lat_deg_top - south) / (lat_deg_top - lat_deg_bottom)))
+
+            px1 = int(x1_frac * tile_w)
+            px2 = int(x2_frac * tile_w)
+            py1 = int(y1_frac * tile_h)
+            py2 = int(y2_frac * tile_h)
+
+            if px2 <= px1: px2 = px1 + 1
+            if py2 <= py1: py2 = py1 + 1
+
+            cropped_tile = elevation_tile[py1:py2, px1:px2]
+            
+            img_grid = Image.fromarray(cropped_tile).resize((grid_size, grid_size), Image.Resampling.BILINEAR)
             elevation_grid = np.array(img_grid, dtype=np.float32)
             elevation_grid[elevation_grid < -1000] = 0
             return elevation_grid
@@ -178,7 +205,6 @@ def compute_p2p_endpoint():
             dist_a = fraction * total_meters
             dist_b = (1.0 - fraction) * total_meters
 
-            # Apply Effective Earth Radius (K = 4/3 = 1.333) refraction drop correction
             earth_radius = 6371000.0 * (4.0 / 3.0)
             earth_bulge = (dist_a * dist_b) / (2.0 * earth_radius)
 
@@ -194,8 +220,6 @@ def compute_p2p_endpoint():
             fresnel_lower_elevs.append(round(float(req_clearance), 1))
 
             check_baseline = req_clearance if use_fresnel else line_of_sight_elev
-            
-            # Allow up to 40% knife-edge diffraction tolerance for GMRS full-quieting validity
             tolerance_margin = (0.4 * f1_radius) if use_fresnel else 0.0
 
             if ground_elev > (check_baseline + tolerance_margin):
