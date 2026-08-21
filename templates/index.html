@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body, html { height: 100%; margin: 0; padding: 0; font-family: sans-serif; }
+        body, html { height: 100%; margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; }
         #map { width: 100%; height: 100vh; }
         #controls {
             position: absolute; top: 10px; right: 10px; z-index: 1000;
@@ -19,12 +19,13 @@
         .control-group input, .control-group select { width: 100%; padding: 5px; box-sizing: border-box; }
         
         #profileModal {
-            display: none; position: absolute; bottom: 20px; left: 20px; right: 20px; max-width: 850px;
-            margin: 0 auto; background: white; z-index: 2000; padding: 15px; border-radius: 8px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            display: none; position: absolute; bottom: 20px; left: 20px; width: 750px; max-width: 90vw;
+            background: white; z-index: 2000; padding: 15px; border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid #ccc;
         }
+        #modalHeader { cursor: move; user-select: none; }
         #profileModal h4 { margin: 0 0 10px 0; font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
-        #closeModal { cursor: pointer; background: #ddd; border: none; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+        .modal-btns button { cursor: pointer; background: #ddd; border: none; padding: 2px 8px; border-radius: 4px; font-weight: bold; margin-left: 3px; }
         
         #operatorInsights {
             background: #f1f8ff; border-left: 4px solid #007bff; padding: 10px; margin-bottom: 10px;
@@ -138,19 +139,24 @@
         </div>
     </div>
 
-    <!-- Profile Graph Modal -->
+    <!-- Draggable Profile Graph Modal -->
     <div id="profileModal">
-        <h4>
-            <span id="modalTitle">Path Elevation Profile</span>
-            <div>
-                <button class="leg-tab active" id="btnLeg1" onclick="switchLeg(1)" style="display:none;">Leg 1: A → B</button>
-                <button class="leg-tab" id="btnLeg2" onclick="switchLeg(2)" style="display:none;">Leg 2: B → C</button>
-                <button id="closeModal">X</button>
+        <div id="modalHeader">
+            <h4>
+                <span id="modalTitle">Path Elevation Profile</span>
+                <div class="modal-btns">
+                    <button class="leg-tab active" id="btnLeg1" onclick="switchLeg(1)" style="display:none;">Leg 1: A → B</button>
+                    <button class="leg-tab" id="btnLeg2" onclick="switchLeg(2)" style="display:none;">Leg 2: B → C</button>
+                    <button id="minimizeModal" onclick="toggleMinimize()">_</button>
+                    <button id="closeModal">X</button>
+                </div>
+            </h4>
+        </div>
+        <div id="modalBody">
+            <div id="operatorInsights">Evaluating link path...</div>
+            <div style="height: 180px;">
+                <canvas id="profileChart"></canvas>
             </div>
-        </h4>
-        <div id="operatorInsights">Evaluating link path...</div>
-        <div style="height: 180px;">
-            <canvas id="profileChart"></canvas>
         </div>
     </div>
 
@@ -171,6 +177,41 @@
         var lastAnalysisData = null;
         var activeLegIndex = 1;
 
+        // --- Draggable Modal Logic ---
+        var modal = document.getElementById('profileModal');
+        var header = document.getElementById('modalHeader');
+        var isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
+
+        header.addEventListener('mousedown', function(e) {
+            isDragging = true;
+            dragOffsetX = e.clientX - modal.offsetLeft;
+            dragOffsetY = e.clientY - modal.offsetTop;
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', function(e) {
+            if (!isDragging) return;
+            modal.style.left = (e.clientX - dragOffsetX) + 'px';
+            modal.style.top = (e.clientY - dragOffsetY) + 'px';
+            modal.style.bottom = 'auto'; // release bottom anchoring
+        });
+
+        document.addEventListener('mouseup', function() { isDragging = false; });
+
+        function toggleMinimize() {
+            var body = document.getElementById('modalBody');
+            var btn = document.getElementById('minimizeModal');
+            if (body.style.display === 'none') {
+                body.style.display = 'block';
+                btn.innerText = '_';
+            } else {
+                body.style.display = 'none';
+                btn.innerText = '+';
+            }
+        }
+
+        document.getElementById('closeModal').addEventListener('click', function() { modal.style.display = 'none'; });
+
         const modeDescriptions = {
             'viewshed': "<b>360° Viewshed:</b> Computes line-of-sight visibility across a panoramic radius from a single observer point. <i>How to use:</i> Click anywhere on the map.",
             'p2p': "<b>Point-to-Point Link:</b> Evaluates terrain clearance, obstruction height, and Fresnel zones between two transceivers. <br><i>How to use:</i> Type addresses above or click Map for Point A, then Point B.",
@@ -181,7 +222,7 @@
         document.getElementById('analysisMode').addEventListener('change', function(e) {
             var mode = e.target.value;
             resetMapLayers();
-            document.getElementById('profileModal').style.display = 'none';
+            modal.style.display = 'none';
             document.getElementById('modeDescription').innerHTML = modeDescriptions[mode];
             
             if (mode === 'p2p') {
@@ -233,7 +274,6 @@
             }
         });
 
-        document.getElementById('closeModal').addEventListener('click', function() { document.getElementById('profileModal').style.display = 'none'; });
         document.getElementById('clearP2PBtn').addEventListener('click', function() { resetMapLayers(); alert("Points cleared."); });
         document.getElementById('rerunBtn').addEventListener('click', function() { executeAnalysis(); });
 
@@ -249,7 +289,7 @@
             overlapStations = [];
             mapLines.forEach(l => map.removeLayer(l));
             mapLines = [];
-            document.getElementById('profileModal').style.display = 'none';
+            modal.style.display = 'none';
         }
 
         document.getElementById('searchBtn').addEventListener('click', performSearch);
@@ -455,7 +495,7 @@
         }
 
         function renderProfile(legData, titleText, useFresnel, freqMhz) {
-            document.getElementById('profileModal').style.display = 'block';
+            modal.style.display = 'block';
             if (useFresnel) titleText += " [Fresnel Active]";
             document.getElementById('modalTitle').innerText = titleText;
 
