@@ -24,7 +24,6 @@ def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
     true terrain heights in meters, and builds an accurate grid for vector ray tracing.
     """
     try:
-        # Determine center tile at zoom level 11 for high enough resolution
         zoom = 11
         center_lat = (south + north) / 2.0
         center_lon = (west + east) / 2.0
@@ -42,13 +41,11 @@ def fetch_aws_terrarium_grid(south, north, west, east, grid_size=300):
             tile_img = Image.open(io.BytesIO(img_data)).convert('RGB')
             tile_arr = np.array(tile_img, dtype=np.float32)
             
-            # Decode Terrarium RGB to meters: (red * 256 + green + blue / 256) - 32768
             r = tile_arr[:, :, 0]
             g = tile_arr[:, :, 1]
             b = tile_arr[:, :, 2]
             elevation_tile = (r * 256.0 + g + b / 256.0) - 32768.0
             
-            # Resize decoded tile to match target grid_size
             img_grid = Image.fromarray(elevation_tile).resize((grid_size, grid_size), Image.Resampling.BILINEAR)
             elevation_grid = np.array(img_grid, dtype=np.float32)
             elevation_grid[elevation_grid < -1000] = 0
@@ -163,12 +160,17 @@ def compute_p2p_endpoint():
         for i in range(num_samples):
             r, c = rr[i], cc[i]
             fraction = i / num_samples
-            line_of_sight_elev = elev_a + fraction * (elev_b - elev_a)
-            ground_elev = elevation_grid[r, c]
             
             dist_a = fraction * total_meters
             dist_b = (1.0 - fraction) * total_meters
 
+            # Apply Effective Earth Radius (K = 4/3 = 1.333) refraction drop correction
+            earth_radius = 6371000.0 * (4.0 / 3.0)
+            earth_bulge = (dist_a * dist_b) / (2.0 * earth_radius)
+
+            line_of_sight_elev = elev_a + fraction * (elev_b - elev_a) - earth_bulge
+            ground_elev = elevation_grid[r, c]
+            
             f1_radius = np.sqrt((wavelength * dist_a * dist_b) / total_meters) if (dist_a > 0 and dist_b > 0 and total_meters > 0) else 0.0
             req_clearance = line_of_sight_elev - (0.6 * f1_radius if use_fresnel else 0.0)
 
@@ -178,9 +180,13 @@ def compute_p2p_endpoint():
             fresnel_lower_elevs.append(round(float(req_clearance), 1))
 
             check_baseline = req_clearance if use_fresnel else line_of_sight_elev
-            if ground_elev > check_baseline:
+            
+            # Allow up to 40% knife-edge diffraction tolerance for GMRS full-quieting validity
+            tolerance_margin = (0.4 * f1_radius) if use_fresnel else 0.0
+
+            if ground_elev > (check_baseline + tolerance_margin):
                 clear_path = False
-                margin = ground_elev - check_baseline
+                margin = ground_elev - (check_baseline + tolerance_margin)
                 if margin > max_obstruction_margin:
                     max_obstruction_margin = margin
 
@@ -257,11 +263,15 @@ def compute_multipoint_endpoint():
             for i in range(num_samples):
                 r, c = rr[i], cc[i]
                 fraction = i / num_samples
-                los_elev = elev_a + fraction * (elev_b - elev_a)
-                ground_elev = elevation_grid[r, c]
                 
                 dist_a = fraction * total_meters
                 dist_b = (1.0 - fraction) * total_meters
+
+                earth_radius = 6371000.0 * (4.0 / 3.0)
+                earth_bulge = (dist_a * dist_b) / (2.0 * earth_radius)
+
+                los_elev = elev_a + fraction * (elev_b - elev_a) - earth_bulge
+                ground_elev = elevation_grid[r, c]
 
                 f1 = np.sqrt((wavelength * dist_a * dist_b) / total_meters) if (dist_a > 0 and dist_b > 0 and total_meters > 0) else 0.0
                 req_clearance = los_elev - (0.6 * f1 if use_fresnel else 0.0)
@@ -272,9 +282,11 @@ def compute_multipoint_endpoint():
                 fresnel_vals.append(round(float(req_clearance), 1))
 
                 check_base = req_clearance if use_fresnel else los_elev
-                if ground_elev > check_base:
+                tolerance_margin = (0.4 * f1) if use_fresnel else 0.0
+
+                if ground_elev > (check_base + tolerance_margin):
                     clear_leg = False
-                    margin = ground_elev - check_base
+                    margin = ground_elev - (check_base + tolerance_margin)
                     if margin > max_obs: max_obs = margin
 
             return {
