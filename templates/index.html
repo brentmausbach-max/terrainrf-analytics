@@ -100,18 +100,18 @@
 
         <!-- Height Inputs -->
         <div class="control-group" id="heightGroup1">
-            <label id="labelHeight1">Observer Height (m):</label>
-            <input type="number" id="obsHeight" value="2.0">
+            <label id="labelHeight1">Observer Height (ft):</label>
+            <input type="number" id="obsHeight" value="6.5">
         </div>
 
         <div class="control-group" id="heightGroup2" style="display: none;">
-            <label id="labelHeight2">Receiver Height B (m):</label>
-            <input type="number" id="obsHeight2" value="10.0">
+            <label id="labelHeight2">Receiver Height B (ft):</label>
+            <input type="number" id="obsHeight2" value="30.0">
         </div>
 
         <div class="control-group" id="heightGroup3" style="display: none;">
-            <label id="labelHeight3">Station Height C (m):</label>
-            <input type="number" id="obsHeight3" value="4.0">
+            <label id="labelHeight3">Station Height C (ft):</label>
+            <input type="number" id="obsHeight3" value="13.0">
         </div>
 
         <div class="control-group" id="fresnelGroup" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
@@ -176,6 +176,8 @@
         var profileChartInstance = null;
         var lastAnalysisData = null;
         var activeLegIndex = 1;
+        
+        const METERS_TO_FEET = 3.28084;
 
         // --- Draggable Modal Logic ---
         var modal = document.getElementById('profileModal');
@@ -193,7 +195,7 @@
             if (!isDragging) return;
             modal.style.left = (e.clientX - dragOffsetX) + 'px';
             modal.style.top = (e.clientY - dragOffsetY) + 'px';
-            modal.style.bottom = 'auto'; // release bottom anchoring
+            modal.style.bottom = 'auto';
         });
 
         document.addEventListener('mouseup', function() { isDragging = false; });
@@ -231,8 +233,8 @@
                 document.getElementById('heightGroup1').style.display = 'block';
                 document.getElementById('heightGroup2').style.display = 'block';
                 document.getElementById('heightGroup3').style.display = 'none';
-                document.getElementById('labelHeight1').innerText = 'Tower Height A (m):';
-                document.getElementById('labelHeight2').innerText = 'Receiver Height B (m):';
+                document.getElementById('labelHeight1').innerText = 'Tower Height A (ft):';
+                document.getElementById('labelHeight2').innerText = 'Receiver Height B (ft):';
                 document.getElementById('fresnelGroup').style.display = 'block';
                 document.getElementById('p2pActionGroup').style.display = 'block';
                 document.getElementById('p2pInstructions').style.display = 'block';
@@ -243,9 +245,9 @@
                 document.getElementById('heightGroup1').style.display = 'block';
                 document.getElementById('heightGroup2').style.display = 'block';
                 document.getElementById('heightGroup3').style.display = 'block';
-                document.getElementById('labelHeight1').innerText = 'Home A Height (m):';
-                document.getElementById('labelHeight2').innerText = 'Repeater Height (m):';
-                document.getElementById('labelHeight3').innerText = 'Friend Home C Height (m):';
+                document.getElementById('labelHeight1').innerText = 'Home A Height (ft):';
+                document.getElementById('labelHeight2').innerText = 'Repeater Height (ft):';
+                document.getElementById('labelHeight3').innerText = 'Friend Home C Height (ft):';
                 document.getElementById('fresnelGroup').style.display = 'block';
                 document.getElementById('p2pActionGroup').style.display = 'block';
                 document.getElementById('p2pInstructions').style.display = 'block';
@@ -256,7 +258,7 @@
                 document.getElementById('heightGroup1').style.display = 'block';
                 document.getElementById('heightGroup2').style.display = 'none';
                 document.getElementById('heightGroup3').style.display = 'none';
-                document.getElementById('labelHeight1').innerText = 'Station Height (m):';
+                document.getElementById('labelHeight1').innerText = 'Station Height (ft):';
                 document.getElementById('fresnelGroup').style.display = 'none';
                 document.getElementById('p2pActionGroup').style.display = 'block';
                 document.getElementById('p2pInstructions').style.display = 'block';
@@ -267,7 +269,7 @@
                 document.getElementById('heightGroup1').style.display = 'block';
                 document.getElementById('heightGroup2').style.display = 'none';
                 document.getElementById('heightGroup3').style.display = 'none';
-                document.getElementById('labelHeight1').innerText = 'Observer Height (m):';
+                document.getElementById('labelHeight1').innerText = 'Observer Height (ft):';
                 document.getElementById('fresnelGroup').style.display = 'none';
                 document.getElementById('p2pActionGroup').style.display = 'none';
                 document.getElementById('p2pInstructions').style.display = 'none';
@@ -364,12 +366,12 @@
             var mode = document.getElementById('analysisMode').value;
 
             if (mode === 'viewshed') {
-                var h = document.getElementById('obsHeight').value;
+                var hMeters = document.getElementById('obsHeight').value / METERS_TO_FEET;
                 resetMapLayers();
                 currentMarker = L.marker([lat, lon]).addTo(map).bindPopup("Calculating viewshed...").openPopup();
                 fetch('/compute', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ lat: lat, lon: lon, height: h })
+                    body: JSON.stringify({ lat: lat, lon: lon, height: hMeters })
                 }).then(res => res.json()).then(data => {
                     if (data.success) {
                         currentOverlay = L.imageOverlay(data.overlay_url, data.bounds, { opacity: 0.7 }).addTo(map);
@@ -411,9 +413,10 @@
 
         function executeAnalysis() {
             var mode = document.getElementById('analysisMode').value;
-            var h1 = document.getElementById('obsHeight').value;
-            var h2 = document.getElementById('obsHeight2').value;
-            var h3 = document.getElementById('obsHeight3').value;
+            // Convert user input from feet back to meters for the backend
+            var h1 = document.getElementById('obsHeight').value / METERS_TO_FEET;
+            var h2 = document.getElementById('obsHeight2').value / METERS_TO_FEET;
+            var h3 = document.getElementById('obsHeight3').value / METERS_TO_FEET;
             var useFresnel = document.getElementById('useFresnel').checked;
             var freqMhz = document.getElementById('freqMhz').value;
 
@@ -499,31 +502,37 @@
             if (useFresnel) titleText += " [Fresnel Active]";
             document.getElementById('modalTitle').innerText = titleText;
 
+            // Convert chart data array from meters to feet
+            let groundFeet = legData.chart_data.ground.map(v => v * METERS_TO_FEET);
+            let losFeet = legData.chart_data.los.map(v => v * METERS_TO_FEET);
+            let fresnelFeet = legData.chart_data.fresnel ? legData.chart_data.fresnel.map(v => v * METERS_TO_FEET) : [];
+            let obstructionFeet = legData.max_obstruction_m * METERS_TO_FEET;
+
             var box = document.getElementById('operatorInsights');
             if (legData.clear) {
                 box.className = "";
                 box.innerHTML = `<b>Leg Status: CLEAR.</b> Direct line-of-sight and 60% Fresnel zone clearance (${freqMhz} MHz) are fully maintained.`;
             } else {
                 box.className = "danger";
-                box.innerHTML = `<b>Leg Status: BLOCKED.</b> Obstruction margin exceeds safety by <b>${legData.max_obstruction_m.toFixed(1)}m</b>.`;
+                box.innerHTML = `<b>Leg Status: BLOCKED.</b> Obstruction margin exceeds safety by <b>${obstructionFeet.toFixed(1)} ft</b>.`;
             }
 
             var ctx = document.getElementById('profileChart').getContext('2d');
             if (profileChartInstance) profileChartInstance.destroy();
 
             var datasets = [
-                { label: 'Ground Elevation (m)', data: legData.chart_data.ground, borderColor: 'rgba(100, 100, 100, 1)', backgroundColor: 'rgba(150, 150, 150, 0.2)', fill: true, pointRadius: 0, borderWidth: 2 },
-                { label: 'Line-of-Sight Path (m)', data: legData.chart_data.los, borderColor: legData.clear ? 'rgba(0, 200, 0, 1)' : 'rgba(200, 0, 0, 1)', borderDash: [5, 5], pointRadius: 0, borderWidth: 2, fill: false }
+                { label: 'Ground Elevation (ft)', data: groundFeet, borderColor: 'rgba(100, 100, 100, 1)', backgroundColor: 'rgba(150, 150, 150, 0.2)', fill: true, pointRadius: 0, borderWidth: 2 },
+                { label: 'Line-of-Sight Path (ft)', data: losFeet, borderColor: legData.clear ? 'rgba(0, 200, 0, 1)' : 'rgba(200, 0, 0, 1)', borderDash: [5, 5], pointRadius: 0, borderWidth: 2, fill: false }
             ];
 
             if (useFresnel) {
-                datasets.push({ label: '60% Fresnel Limit (m)', data: legData.chart_data.fresnel, borderColor: 'rgba(255, 140, 0, 1)', borderDash: [2, 2], pointRadius: 0, borderWidth: 1.5, fill: false });
+                datasets.push({ label: '60% Fresnel Limit (ft)', data: fresnelFeet, borderColor: 'rgba(255, 140, 0, 1)', borderDash: [2, 2], pointRadius: 0, borderWidth: 1.5, fill: false });
             }
 
             profileChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: { labels: legData.chart_data.distances, datasets: datasets },
-                options: { responsive: true, maintainAspectRatio: false, scales: { x: { title: { display: true, text: 'Distance (miles)' } }, y: { title: { display: true, text: 'Elevation (meters)' } } } }
+                options: { responsive: true, maintainAspectRatio: false, scales: { x: { title: { display: true, text: 'Distance (miles)' } }, y: { title: { display: true, text: 'Elevation (feet)' } } } }
             });
         }
     </script>
