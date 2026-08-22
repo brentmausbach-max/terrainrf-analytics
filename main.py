@@ -42,13 +42,16 @@ def compute_matrix_endpoint():
         pixel_size_y = (north - south) / actual_nrows
         window_transform = [pixel_size_x, 0, west, 0, -pixel_size_y, north]
 
+        # Use full diagonal distance to prevent artificial horizon clipping rings
+        max_possible_radius = int(np.hypot(actual_nrows, actual_ncols))
+
         mask = compute_viewshed_matrix(
             elevation_grid=elevation_grid,
             window_transform=window_transform,
             observer_row=int(actual_nrows / 2),
             observer_col=int(actual_ncols / 2),
             observer_height_m=height,
-            max_radius_pixels=int(actual_ncols / 2)
+            max_radius_pixels=max_possible_radius
         )
 
         img_array = np.zeros((actual_nrows, actual_ncols, 4), dtype=np.uint8)
