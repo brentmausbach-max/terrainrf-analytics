@@ -31,7 +31,7 @@ def compute_viewshed_matrix(elevation_grid, window_transform, observer_row, obse
         max_elevation_angle = -999.0
         
         for r in range(1, max_radius_pixels):
-            curr_row = int(round(observer_row + r * sin_a))
+            curr_row = int(round(observer_row - r * sin_a))
             curr_col = int(round(observer_col + r * cos_a))
             
             # Stop ray if it goes outside the grid window
