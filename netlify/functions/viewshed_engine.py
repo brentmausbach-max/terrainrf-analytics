@@ -1,6 +1,6 @@
 import numpy as np
 
-def compute_viewshed_matrix(elevation_grid, window_transform, observer_row, observer_col, observer_height_m=2.0, max_radius_pixels=150):
+def compute_viewshed_matrix(elevation_grid, window_transform, observer_row, observer_col, observer_height_m=2.0, max_radius_pixels=None):
     """
     Step B3: Executes the ray-casting algorithm across a local elevation grid 
     to determine line-of-sight visibility for every pixel.
@@ -17,6 +17,10 @@ def compute_viewshed_matrix(elevation_grid, window_transform, observer_row, obse
     # Initialize viewshed output mask (0 = not visible, 1 = visible)
     viewshed_mask = np.zeros_like(elevation_grid, dtype=np.uint8)
     viewshed_mask[observer_row, observer_col] = 1
+    
+    # Dynamically set max radius to cover the full diagonal of the grid if not specified
+    if max_radius_pixels is None:
+        max_radius_pixels = int(np.hypot(height, width))
     
     # Cast rays in a circle around the observer
     num_rays = 360
