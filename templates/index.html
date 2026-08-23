@@ -30,7 +30,7 @@
             position: absolute; 
             top: 0; 
             left: 0; 
-            zIndex: 1; 
+            z-index: 1; 
         }
         
         /* Control Panel Styles with Mobile Drawer Support */
@@ -535,6 +535,19 @@
                 }
                 elevationGrid.push(row);
             }
+
+            // --- DIAGNOSTIC LOGS ADDED HERE ---
+            const flatGrid = elevationGrid.flat();
+            const minElev = Math.min(...flatGrid);
+            const maxElev = Math.max(...flatGrid);
+            const fallbackCount = flatGrid.filter(v => v === 300.0).length;
+
+            console.log("=== DEM GRID DIAGNOSTICS ===");
+            console.log("Grid Dimensions:", elevationGrid.length, "x", elevationGrid[0].length);
+            console.log("Elevation Min:", minElev.toFixed(2), "m (~" + (minElev * 3.28084).toFixed(0) + " ft)");
+            console.log("Elevation Max:", maxElev.toFixed(2), "m (~" + (maxElev * 3.28084).toFixed(0) + " ft)");
+            console.log("Fallback 300.0 Cells:", fallbackCount, "out of", flatGrid.length);
+            console.log("============================");
 
             const response = await fetch('/compute-matrix', {
                 method: 'POST',
