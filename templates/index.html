@@ -1,65 +1,134 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>TerrainRF Analytics - Multi-Hop & P2P</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TerrainRF Analytics - Multi-Hop & P2P</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body, html { height: 100%; margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; }
-        #map { width: 100%; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        :root {
+            --primary-color: #0d6efd;
+            --primary-hover: #0b5ed7;
+            --bg-light: #f8f9fa;
+            --border-color: #dee2e6;
+            --text-main: #333333;
+            --text-muted: #6c757d;
+        }
+
+        body, html { 
+            height: 100%; 
+            margin: 0; 
+            padding: 0; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            overflow: hidden; 
+        }
+
+        #map { 
+            width: 100%; 
+            height: 100vh; 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            zIndex: 1; 
+        }
         
         /* Control Panel Styles with Mobile Drawer Support */
         #controls {
-            position: absolute; top: 10px; right: 10px; z-index: 1000;
-            background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-            width: 320px; max-height: 90vh; display: flex; flex-direction: column;
+            position: absolute; 
+            top: 10px; 
+            right: 10px; 
+            z-index: 1000;
+            background: white; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            width: 340px; 
+            max-height: 90vh; 
+            display: flex; 
+            flex-direction: column;
             transition: transform 0.3s ease;
         }
-        .panel-content { padding: 15px; overflow-y: auto; max-height: calc(90vh - 40px); }
+
+        .panel-content { 
+            padding: 15px; 
+            overflow-y: auto; 
+            max-height: calc(90vh - 42px); 
+        }
         
         /* Mobile Toggle Button (Hidden on Desktop) */
         .mobile-toggle-btn {
-            display: none; background: #0d6efd; color: white; border: none;
-            padding: 10px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: center;
-            border-top-left-radius: 8px; border-top-right-radius: 8px;
+            display: none; 
+            background: var(--primary-color); 
+            color: white; 
+            border: none;
+            padding: 12px; 
+            font-size: 14px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            text-align: center;
+            border-top-left-radius: 8px; 
+            border-top-right-radius: 8px;
         }
 
-        .control-group { margin-bottom: 10px; }
-        .control-group label { display: block; font-weight: bold; font-size: 13px; margin-bottom: 3px; }
-        .control-group input, .control-group select { width: 100%; padding: 5px; box-sizing: border-box; }
+        .control-group { margin-bottom: 12px; }
+        .control-group label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; color: var(--text-main); }
+        .control-group input, .control-group select { 
+            width: 100%; 
+            padding: 8px; 
+            box-sizing: border-box; 
+            border: 1px solid var(--border-color); 
+            border-radius: 4px; 
+            font-size: 13px;
+        }
         
         #profileModal {
-            display: none; position: absolute; bottom: 20px; left: 20px; width: 750px; max-width: 90vw;
-            background: white; z-index: 2000; padding: 15px; border-radius: 8px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid #ccc;
+            display: none; 
+            position: absolute; 
+            bottom: 20px; 
+            left: 20px; 
+            width: 750px; 
+            max-width: 90vw;
+            background: white; 
+            z-index: 2000; 
+            padding: 15px; 
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.25); 
+            border: 1px solid var(--border-color);
         }
-        #modalHeader { cursor: move; user-select: none; }
-        #profileModal h4 { margin: 0 0 10px 0; font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
-        .modal-btns button { cursor: pointer; background: #ddd; border: none; padding: 2px 8px; border-radius: 4px; font-weight: bold; margin-left: 3px; }
+
+        #modalHeader { cursor: move; user-select: none; margin-bottom: 8px; }
+        #profileModal h4 { margin: 0; font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
+        .modal-btns button { cursor: pointer; background: #e9ecef; border: none; padding: 4px 10px; border-radius: 4px; font-weight: 600; margin-left: 4px; font-size: 12px; }
         
         #operatorInsights {
-            background: #f1f8ff; border-left: 4px solid #007bff; padding: 10px; margin-bottom: 10px;
-            font-size: 13px; color: #333; border-radius: 4px; line-height: 1.4;
+            background: #f1f8ff; 
+            border-left: 4px solid var(--primary-color); 
+            padding: 10px; 
+            margin-bottom: 10px;
+            font-size: 13px; 
+            color: var(--text-main); 
+            border-radius: 4px; 
+            line-height: 1.4;
         }
         #operatorInsights.danger { background: #f8d7da; border-left-color: #dc3545; color: #721c24; }
+        
         .leg-tab { padding: 4px 10px; cursor: pointer; background: #e2e8f0; border: none; border-radius: 4px; font-weight: bold; margin-right: 5px; font-size: 12px; }
-        .leg-tab.active { background: #007bff; color: white; }
+        .leg-tab.active { background: var(--primary-color); color: white; }
         
         .instruction-box {
-            background: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 8px; border-radius: 6px; font-size: 12px; margin-top: 8px; line-height: 1.4;
+            background: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 10px; border-radius: 6px; font-size: 12px; margin-top: 10px; line-height: 1.4;
         }
-        .address-row { display: flex; gap: 5px; margin-bottom: 5px; }
+        .address-row { display: flex; gap: 6px; margin-bottom: 6px; }
         .address-row input { flex: 1; }
-        .address-row button { padding: 5px 10px; cursor: pointer; background: #28a745; color: white; border: none; border-radius: 4px; font-size: 11px; }
+        .address-row button { padding: 6px 12px; cursor: pointer; background: #28a745; color: white; border: none; border-radius: 4px; font-size: 12px; font-weight: 600; }
+        .address-row button:hover { background: #218838; }
 
         /* Responsive Mobile Breakpoint */
         @media (max-width: 768px) {
             #controls {
                 top: auto; bottom: 0; right: 0; left: 0; width: 100%; max-height: 75vh;
                 border-bottom-left-radius: 0; border-bottom-right-radius: 0;
-                transform: translateY(calc(100% - 42px));
+                transform: translateY(calc(100% - 46px));
             }
             #controls.expanded {
                 transform: translateY(0);
@@ -68,7 +137,10 @@
                 display: block;
             }
             .panel-content {
-                max-height: calc(75vh - 42px);
+                max-height: calc(75vh - 46px);
+            }
+            #profileModal {
+                left: 5%; width: 90vw; bottom: 10px;
             }
         }
     </style>
@@ -79,10 +151,10 @@
     <div id="controls">
         <button id="panelToggle" class="mobile-toggle-btn" onclick="toggleMobilePanel()">▼ TerrainRF Controls</button>
         <div class="panel-content">
-            <div style="background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef; padding: 10px; margin-bottom: 12px;">
-                <h5 style="font-size: 14px; color: #0d6efd; margin: 0 0 4px 0; font-weight: bold;">TerrainRF Analytics[cite: 1]</h5>
-                <p style="font-size: 11px; color: #6c757d; margin: 0; line-height: 1.3;">
-                    A keyless terrain and radio line-of-sight analysis tool. Compute true vector ray-tracing, 360° viewsheds, point-to-point links, and multi-station coverage overlaps[cite: 1].
+            <div style="background: var(--bg-light); border-radius: 6px; border: 1px solid var(--border-color); padding: 10px; margin-bottom: 12px;">
+                <h5 style="font-size: 14px; color: var(--primary-color); margin: 0 0 4px 0; font-weight: bold;">TerrainRF Analytics[cite: 1]</h5>
+                <p style="font-size: 11px; color: var(--text-muted); margin: 0; line-height: 1.4;">
+                    Keyless terrain and radio line-of-sight analysis. Compute vector ray-tracing, 360° viewsheds, P2P links, and multi-station coverage[cite: 1].
                 </p>
             </div>
 
@@ -96,12 +168,12 @@
                 </select>
             </div>
 
-            <div id="modeDescription" style="font-size: 11px; color: #495057; background: #e7f1ff; border-left: 3px solid #0d6efd; padding: 6px 8px; margin-bottom: 10px; border-radius: 4px;">
+            <div id="modeDescription" style="font-size: 11px; color: #495057; background: #e7f1ff; border-left: 3px solid var(--primary-color); padding: 8px; margin-bottom: 12px; border-radius: 4px; line-height: 1.4;">
                 <b>360° Viewshed:</b> Computes line-of-sight visibility across a panoramic radius from a single observer point[cite: 1].
             </div>
 
-            <div class="control-group" id="addressGroupP2P" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
-                <label style="font-size: 12px; margin-bottom: 5px; color: #0d6efd;"><b>Quick Lookup Addresses/Landmarks:</b></label>
+            <div class="control-group" id="addressGroupP2P" style="display: none; background: var(--bg-light); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                <label style="font-size: 12px; margin-bottom: 6px; color: var(--primary-color);"><b>Quick Lookup Addresses:</b></label>
                 <div class="address-row">
                     <input type="text" id="p2pAddrA" placeholder="Point A (e.g., Starting Address)">
                     <button onclick="lookupP2PPoint('A')">Find A</button>
@@ -112,18 +184,18 @@
                 </div>
             </div>
 
-            <div class="control-group" id="addressGroupMulti" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
-                <label style="font-size: 12px; margin-bottom: 5px; color: #0d6efd;"><b>Quick Lookup Addresses/Landmarks:</b></label>
+            <div class="control-group" id="addressGroupMulti" style="display: none; background: var(--bg-light); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                <label style="font-size: 12px; margin-bottom: 6px; color: var(--primary-color);"><b>Quick Lookup Addresses:</b></label>
                 <div class="address-row">
-                    <input type="text" id="addrA" placeholder="Point A (e.g., My Address)">
+                    <input type="text" id="addrA" placeholder="Home A Address">
                     <button onclick="lookupPoint('A')">Find A</button>
                 </div>
                 <div class="address-row">
-                    <input type="text" id="addrB" placeholder="Repeater (e.g., Mount Woodson)">
+                    <input type="text" id="addrB" placeholder="Repeater Address">
                     <button onclick="lookupPoint('B')">Find Repeater</button>
                 </div>
                 <div class="address-row">
-                    <input type="text" id="addrC" placeholder="Point C (e.g., Friend Address)">
+                    <input type="text" id="addrC" placeholder="Friend Home C Address">
                     <button onclick="lookupPoint('C')">Find C</button>
                 </div>
             </div>
@@ -143,7 +215,7 @@
                 <input type="number" id="obsHeight3" value="13.0">
             </div>
 
-            <div class="control-group" id="fresnelGroup" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+            <div class="control-group" id="fresnelGroup" style="display: none; background: var(--bg-light); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
                 <label style="font-size: 12px;">Frequency (MHz):</label>
                 <input type="number" id="freqMhz" value="462.0" style="margin-bottom: 8px;">
                 <label style="display: flex; align-items: center; font-weight: normal; font-size: 12px; cursor: pointer;">
@@ -152,14 +224,14 @@
             </div>
 
             <div class="control-group" id="p2pActionGroup" style="display: none;">
-                <button id="rerunBtn" style="padding: 6px; cursor: pointer; width: 100%; background: #0d6efd; color: white; border: none; border-radius: 4px; font-weight: bold; margin-bottom: 5px;">Re-run Analysis</button>
-                <button id="clearP2PBtn" style="padding: 5px; cursor: pointer; width: 100%; background: #6c757d; color: white; border: none; border-radius: 4px;">Reset Points</button>
+                <button id="rerunBtn" style="padding: 8px; cursor: pointer; width: 100%; background: var(--primary-color); color: white; border: none; border-radius: 4px; font-weight: bold; margin-bottom: 6px;">Re-run Analysis</button>
+                <button id="clearP2PBtn" style="padding: 6px; cursor: pointer; width: 100%; background: var(--text-muted); color: white; border: none; border-radius: 4px;">Reset Points</button>
             </div>
 
             <div class="control-group">
                 <label>General Map Search:</label>
-                <input type="text" id="searchQuery" placeholder="City, Zip, or Lat,Lon">
-                <button id="searchBtn" style="padding: 5px 8px; margin-top: 5px; cursor: pointer; width: 100%;">Go</button>
+                <input type="text" id="searchQuery" placeholder="City, Zip, or Lat, Lon">
+                <button id="searchBtn" style="padding: 6px 10px; margin-top: 6px; cursor: pointer; width: 100%; background: #e9ecef; border: 1px solid var(--border-color); border-radius: 4px; font-weight: 600;">Go</button>
             </div>
             
             <div id="p2pInstructions" class="instruction-box" style="display: none;">
@@ -175,14 +247,14 @@
                 <div class="modal-btns">
                     <button class="leg-tab active" id="btnLeg1" onclick="switchLeg(1)" style="display:none;">Leg 1: A → B</button>
                     <button class="leg-tab" id="btnLeg2" onclick="switchLeg(2)" style="display:none;">Leg 2: B → C</button>
-                    <button id="minimizeModal" onclick="toggleMinimize()">_</button>
-                    <button id="closeModal">X</button>
+                    <button id="minimizeModal" onclick="toggleMinimize()" title="Minimize">_</button>
+                    <button id="closeModal" title="Close">×</button>
                 </div>
             </h4>
         </div>
         <div id="modalBody">
             <div id="operatorInsights">Evaluating link path...</div>
-            <div style="height: 180px;">
+            <div style="height: 190px;">
                 <canvas id="profileChart"></canvas>
             </div>
         </div>
@@ -229,11 +301,7 @@
             var controls = document.getElementById('controls');
             var btn = document.getElementById('panelToggle');
             controls.classList.toggle('expanded');
-            if (controls.classList.contains('expanded')) {
-                btn.innerText = "▲ Hide Controls";
-            } else {
-                btn.innerText = "▼ TerrainRF Controls";
-            }
+            btn.innerText = controls.classList.contains('expanded') ? "▲ Hide Controls" : "▼ TerrainRF Controls";
         }
 
         function toggleMinimize() {
@@ -251,7 +319,7 @@
         document.getElementById('closeModal').addEventListener('click', function() { modal.style.display = 'none'; });
 
         const modeDescriptions = {
-            'viewshed': "<b>360° Viewshed:</b> Computes line-of-sight visibility across a panoramic radius from a single observer point. <i>How to use:</i> Click anywhere on the map.",
+            'viewshed': "<b>360° Viewshed:</b> Computes line-of-sight visibility across a panoramic radius from a single observer point[cite: 1]. <i>How to use:</i> Click anywhere on the map.",
             'p2p': "<b>Point-to-Point Link:</b> Evaluates terrain clearance, obstruction height, and Fresnel zones between two transceivers. <br><i>How to use:</i> Type addresses above or click Map for Point A, then Point B.",
             'multipoint': "<b>Repeater Relay Link:</b> Test if Home A and Friend Home B can talk through a Repeater (Point C). <br><i>How to use:</i> Type addresses above or click map pins sequentially.",
             'overlap': "<b>Coverage Area Overlap:</b> Combines viewsheds from multiple base stations to find inter-visibility 'sweet spots'. <br><b>How to use:</b><br>1. Click map to drop station pins.<br>2. Click <b>'Re-run Analysis'</b>."
@@ -312,7 +380,7 @@
             }
         });
 
-        document.getElementById('clearP2PBtn').addEventListener('click', function() { resetMapLayers(); alert("Points cleared."); });
+        document.getElementById('clearP2PBtn').addEventListener('click', function() { resetMapLayers(); });
         document.getElementById('rerunBtn').addEventListener('click', function() { executeAnalysis(); });
 
         function resetMapLayers() {
@@ -340,7 +408,7 @@
                 .then(res => res.json()).then(data => {
                     if (data && data.length > 0) map.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 12);
                     else alert("Location not found.");
-                });
+                }).catch(() => alert("Search service error."));
         }
 
         function lookupP2PPoint(target) {
@@ -361,13 +429,11 @@
                         pMarkers[index] = L.marker([lat, lon]).addTo(map).bindPopup(label).openPopup();
                         map.setView([lat, lon], 12);
 
-                        if (pPoints[0] && pPoints[1]) {
-                            executeAnalysis();
-                        }
+                        if (pPoints[0] && pPoints[1]) executeAnalysis();
                     } else {
                         alert("Location '" + q + "' not found.");
                     }
-                });
+                }).catch(() => alert("Lookup service error."));
         }
 
         function lookupPoint(target) {
@@ -388,19 +454,16 @@
                         pMarkers[index] = L.marker([lat, lon]).addTo(map).bindPopup(label).openPopup();
                         map.setView([lat, lon], 12);
 
-                        if (pPoints[0] && pPoints[1] && pPoints[2]) {
-                            executeAnalysis();
-                        }
+                        if (pPoints[0] && pPoints[1] && pPoints[2]) executeAnalysis();
                     } else {
                         alert("Location '" + q + "' not found.");
                     }
-                });
+                }).catch(() => alert("Lookup service error."));
         }
 
         async function computeViewshedClientSide(lat, lon, height) {
             const zoom = 13;
             const n = Math.pow(2, zoom);
-            
             const span = 0.5;
             const south = lat - span, north = lat + span;
             const west = lon - span, east = lon + span;
@@ -569,9 +632,7 @@
                         currentOverlay = L.imageOverlay(data.overlay_url, data.bounds, { opacity: 0.7 }).addTo(map);
                         currentMarker.bindPopup("<b>Observer Point</b>").openPopup();
                     } else alert("Error: " + data.error);
-                }).catch(err => {
-                    alert("Error: " + err);
-                });
+                }).catch(err => alert("Error: " + err));
             } else if (mode === 'p2p') {
                 if (!pPoints[0] || pPoints[1]) {
                     resetMapLayers();
@@ -615,7 +676,7 @@
 
             if (mode === 'p2p') {
                 if (!pPoints[0] || !pPoints[1]) {
-                    alert("Please fill out or click both Point A and Point B.");
+                    alert("Please select both Point A and Point B.");
                     return;
                 }
                 var padding = 0.1;
@@ -645,10 +706,10 @@
                         document.getElementById('btnLeg2').style.display = 'none';
                         renderProfile(data, "P2P Link Profile", useFresnel, freqMhz);
                     } else alert("Error: " + data.error);
-                });
+                }).catch(err => alert("Analysis failed: " + err));
             } else if (mode === 'multipoint') {
                 if (!pPoints[0] || !pPoints[1] || !pPoints[2]) {
-                    alert("Please fill out or click all three points (Home A, Repeater, Friend C).");
+                    alert("Please select all three points (Home A, Repeater, Friend C).");
                     return;
                 }
                 var lats = [pPoints[0].lat, pPoints[1].lat, pPoints[2].lat];
@@ -683,10 +744,10 @@
                         document.getElementById('btnLeg2').style.display = 'inline-block';
                         switchLeg(1);
                     } else alert("Error: " + data.error);
-                });
+                }).catch(err => alert("Analysis failed: " + err));
             } else if (mode === 'overlap') {
                 if (overlapStations.length === 0) {
-                    alert("Please click the map to place at least one station first.");
+                    alert("Please place at least one station on the map first.");
                     return;
                 }
                 fetch('/compute-overlap', {
@@ -698,7 +759,7 @@
                         currentOverlay = L.imageOverlay(data.overlay_url, data.bounds, { opacity: 0.7 }).addTo(map);
                         alert("Coverage overlap computed successfully!");
                     } else alert("Error: " + data.error);
-                });
+                }).catch(err => alert("Overlap computation failed: " + err));
             }
         }
 
@@ -748,7 +809,14 @@
             profileChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: { labels: legData.chart_data.distances, datasets: datasets },
-                options: { responsive: true, maintainAspectRatio: false, scales: { x: { title: { display: true, text: 'Distance (miles)' } }, y: { title: { display: true, text: 'Elevation (feet)' } } } }
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false, 
+                    scales: { 
+                        x: { title: { display: true, text: 'Distance (miles)' } }, 
+                        y: { title: { display: true, text: 'Elevation (feet)' } } 
+                    } 
+                }
             });
         }
     </script>
