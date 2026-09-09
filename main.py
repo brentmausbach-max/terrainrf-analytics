@@ -27,6 +27,8 @@ def compute_matrix_endpoint():
         req_data = request.get_json() or {}
         grid_data = req_data.get("elevation_grid")
         height = float(req_data.get("height", 2.0))
+        lat = float(req_data.get("lat"))
+        lon = float(req_data.get("lon"))
         south = float(req_data.get("south"))
         north = float(req_data.get("north"))
         west = float(req_data.get("west"))
@@ -38,20 +40,20 @@ def compute_matrix_endpoint():
         elevation_grid = np.array(grid_data, dtype=np.float32)
         actual_nrows, actual_ncols = elevation_grid.shape
 
+        obs_row = int(np.clip((north - lat) / (north - south) * (actual_nrows - 1), 0, actual_nrows - 1))
+        obs_col = int(np.clip((lon - west) / (east - west) * (actual_ncols - 1), 0, actual_ncols - 1))
+
         pixel_size_x = (east - west) / actual_ncols
         pixel_size_y = (north - south) / actual_nrows
         window_transform = [pixel_size_x, 0, west, 0, -pixel_size_y, north]
 
-        # Use full diagonal distance to prevent artificial horizon clipping rings
-        max_possible_radius = int(np.hypot(actual_nrows, actual_ncols))
-
         mask = compute_viewshed_matrix(
             elevation_grid=elevation_grid,
             window_transform=window_transform,
-            observer_row=int(actual_nrows / 2),
-            observer_col=int(actual_ncols / 2),
+            observer_row=obs_row,
+            observer_col=obs_col,
             observer_height_m=height,
-            max_radius_pixels=max_possible_radius
+            max_radius_pixels=int(actual_ncols / 2)
         )
 
         img_array = np.zeros((actual_nrows, actual_ncols, 4), dtype=np.uint8)
